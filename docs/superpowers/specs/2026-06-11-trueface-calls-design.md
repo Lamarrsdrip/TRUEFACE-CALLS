@@ -368,11 +368,11 @@ The initial renderer is a privacy-preserving, browser-local mesh/texture composi
 
 ### Profiles
 
-| Mode | Target | FPS | Tracking | Billing multiplier |
-| --- | --- | --- | --- | --- |
-| Low | 360p | 12-15 | reduced landmarks, basic smoothing | 1.0x |
-| Standard | 480p | 20-24 | full landmarks, adaptive smoothing | 1.5x |
-| HD | 720p | 24-30 | full landmarks, enhanced compositor | 2.5x |
+| Mode     | Target | FPS   | Tracking                            | Billing multiplier |
+| -------- | ------ | ----- | ----------------------------------- | ------------------ |
+| Low      | 360p   | 12-15 | reduced landmarks, basic smoothing  | 1.0x               |
+| Standard | 480p   | 20-24 | full landmarks, adaptive smoothing  | 1.5x               |
+| HD       | 720p   | 24-30 | full landmarks, enhanced compositor | 2.5x               |
 
 ### Automatic degradation
 
@@ -502,4 +502,3 @@ The repository is a production-ready foundation when:
 - Builds, migrations, and startup commands are documented and verified.
 - Mobile layouts pass iPhone and Android viewport audits.
 - GitHub and Emergent import instructions are complete.
-

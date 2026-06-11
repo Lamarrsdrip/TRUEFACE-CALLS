@@ -1,0 +1,650 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETION_PENDING
+  DELETED
+}
+
+enum AuthTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  QUARANTINED
+}
+
+enum RoomStatus {
+  SCHEDULED
+  OPEN
+  ACTIVE
+  ENDED
+  EXPIRED
+}
+
+enum ParticipantRole {
+  HOST
+  MODERATOR
+  PARTICIPANT
+}
+
+enum ParticipantState {
+  REQUESTED
+  WAITING
+  APPROVED
+  REJECTED
+  JOINED
+  LEFT
+  REMOVED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELED
+  INCOMPLETE
+}
+
+enum PaymentProvider {
+  STRIPE
+  PAYSTACK
+  FLUTTERWAVE
+  MANUAL
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  CANCELED
+}
+
+enum PaymentType {
+  SUBSCRIPTION
+  CREDIT_PURCHASE
+}
+
+enum CreditTransactionType {
+  TRIAL_GRANT
+  SUBSCRIPTION_GRANT
+  PURCHASE
+  RESERVATION
+  RESERVATION_RELEASE
+  USAGE
+  ADMIN_ADJUSTMENT
+  REFUND_DEBIT
+  EXPIRATION
+}
+
+enum UsageMode {
+  BASE_CALL
+  AI_FACE
+  VOICE_EFFECT
+  CLOUD_GPU
+}
+
+enum QualityMode {
+  LOW
+  STANDARD
+  HD
+}
+
+enum AbuseStatus {
+  OPEN
+  INVESTIGATING
+  ACTIONED
+  DISMISSED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPERATIONS
+  MODERATOR
+  BILLING
+  SUPPORT
+  ANALYST
+}
+
+enum ProviderStatus {
+  UNCONFIGURED
+  OPERATIONAL
+  DEGRADED
+  DOWN
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id                    String            @id @default(uuid()) @db.Uuid
+  email                 String            @unique
+  passwordHash          String
+  displayName           String
+  avatarUrl             String?
+  status                UserStatus        @default(ACTIVE)
+  emailVerifiedAt       DateTime?
+  locale                String            @default("en")
+  timezone              String            @default("UTC")
+  lastLoginAt           DateTime?
+  deletionScheduledAt   DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  sessions              Session[]
+  authTokens            AuthToken[]
+  devices               Device[]
+  faceProfiles          FaceProfile[]
+  consentLogs           ConsentLog[]
+  hostedRooms           CallRoom[]        @relation("RoomHost")
+  callParticipants      CallParticipant[]
+  subscriptions         Subscription[]
+  payments              Payment[]
+  creditWallet           CreditWallet?
+  reportsFiled          AbuseReport[]      @relation("ReportReporter")
+  reportsAgainst        AbuseReport[]      @relation("ReportSubject")
+  blocksCreated         BlockedUser[]      @relation("Blocker")
+  blocksReceived        BlockedUser[]      @relation("Blocked")
+  adminProfile          AdminUser?
+  auditLogs             AuditLog[]         @relation("AuditActorUser")
+  notifications         Notification[]
+  settingsUpdated       AppSetting[]       @relation("SettingUpdatedBy")
+  teamMemberships       TeamMember[]
+  ownedTeams            Team[]             @relation("TeamOwner")
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AuthToken {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @db.Uuid
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, expiresAt])
+}
+
+model Session {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  refreshTokenHash String   @unique
+  ipHash           String?
+  userAgent         String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  rotatedFromId    String?  @db.Uuid
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Device {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid
+  fingerprintHash String
+  label           String?
+  capabilityClass String?
+  lastSeenAt      DateTime  @default(now())
+  trustedAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprintHash])
+  @@index([userId, lastSeenAt])
+}
+
+model FaceProfile {
+  id               String                  @id @default(uuid()) @db.Uuid
+  userId           String                  @db.Uuid
+  name             String
+  objectKey        String                  @unique
+  thumbnailKey     String?
+  mimeType         String
+  sizeBytes        Int
+  width            Int
+  height           Int
+  qualityScore     Int
+  qualitySignals   Json
+  moderationStatus ModerationStatus        @default(PENDING)
+  metadataEncrypted String?
+  consentRevokedAt DateTime?
+  deletionRequestedAt DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  user             User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  consentLogs      ConsentLog[]
+  moderationEvents FaceModerationEvent[]
+  reports          AbuseReport[]
+
+  @@index([userId, deletedAt])
+  @@index([moderationStatus, createdAt])
+}
+
+model ConsentLog {
+  id                    String      @id @default(uuid()) @db.Uuid
+  userId                String      @db.Uuid
+  faceProfileId         String      @db.Uuid
+  ownsOrHasPermission   Boolean
+  consentsToFaceUse     Boolean
+  acceptsFaceTerms      Boolean
+  termsVersion          String
+  privacyVersion        String
+  ipHash                String?
+  userAgent             String?
+  acceptedAt            DateTime    @default(now())
+  revokedAt             DateTime?
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  faceProfile           FaceProfile @relation(fields: [faceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([faceProfileId, acceptedAt])
+}
+
+model FaceModerationEvent {
+  id            String           @id @default(uuid()) @db.Uuid
+  faceProfileId String           @db.Uuid
+  moderatorId   String?          @db.Uuid
+  status        ModerationStatus
+  reasonCodes   String[]
+  modelSignals  Json?
+  note          String?
+  createdAt     DateTime         @default(now())
+  faceProfile   FaceProfile      @relation(fields: [faceProfileId], references: [id], onDelete: Cascade)
+  moderator     AdminUser?       @relation(fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  @@index([faceProfileId, createdAt])
+}
+
+model CallRoom {
+  id                   String            @id @default(uuid()) @db.Uuid
+  hostId               String            @db.Uuid
+  slug                 String            @unique
+  title                String
+  status               RoomStatus        @default(OPEN)
+  inviteVersion        Int               @default(1)
+  passwordHash         String?
+  waitingRoom          Boolean           @default(true)
+  allowGuests          Boolean           @default(true)
+  maxParticipants      Int               @default(2)
+  expiresAt            DateTime
+  startedAt            DateTime?
+  endedAt              DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  host                 User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Restrict)
+  participants         CallParticipant[]
+  history              CallHistory?
+  events               CallEvent[]
+  usageMinutes         UsageMinute[]
+  reports              AbuseReport[]
+  creditTransactions   CreditTransaction[]
+
+  @@index([hostId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model CallParticipant {
+  id              String           @id @default(uuid()) @db.Uuid
+  roomId          String           @db.Uuid
+  userId          String?          @db.Uuid
+  guestName       String?
+  guestTokenHash  String?
+  livekitIdentity String?          @unique
+  role            ParticipantRole  @default(PARTICIPANT)
+  state           ParticipantState @default(REQUESTED)
+  aiDisclosure    Boolean          @default(false)
+  joinedAt        DateTime?
+  leftAt          DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  room            CallRoom         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  usageMinutes    UsageMinute[]
+
+  @@index([roomId, state])
+  @@index([userId, createdAt])
+}
+
+model CallHistory {
+  id               String   @id @default(uuid()) @db.Uuid
+  roomId           String   @unique @db.Uuid
+  startedAt        DateTime
+  endedAt          DateTime
+  participantCount Int
+  aiMilliseconds   Int      @default(0)
+  qualitySummary   Json?
+  terminationReason String?
+  createdAt        DateTime @default(now())
+  room             CallRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([startedAt])
+}
+
+model CallEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  actorId   String?
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+  room      CallRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([type, createdAt])
+}
+
+model Plan {
+  id                 String         @id @default(uuid()) @db.Uuid
+  key                String         @unique
+  name               String
+  description        String
+  monthlyCredits     Int
+  maxFaceProfiles    Int
+  maxParticipants    Int
+  allowedQualities   QualityMode[]
+  groupCalls         Boolean
+  voiceEffects       Boolean
+  cloudGpu           Boolean
+  priceMonthlyMinor  Int
+  currency           String         @default("USD")
+  providerPriceRefs  Json?
+  enabled            Boolean        @default(true)
+  sortOrder          Int            @default(0)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  subscriptions      Subscription[]
+
+  @@index([enabled, sortOrder])
+}
+
+model Subscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  userId                 String?            @db.Uuid
+  teamId                 String?            @db.Uuid
+  planId                 String             @db.Uuid
+  provider               PaymentProvider
+  externalCustomerId     String?
+  externalSubscriptionId String?            @unique
+  status                 SubscriptionStatus @default(INCOMPLETE)
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  canceledAt             DateTime?
+  retryAt                DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  user                   User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team                   Team?              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  plan                   Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([userId, status])
+  @@index([teamId, status])
+}
+
+model Payment {
+  id                String          @id @default(uuid()) @db.Uuid
+  userId            String          @db.Uuid
+  provider          PaymentProvider
+  type              PaymentType
+  status            PaymentStatus   @default(PENDING)
+  amountMinor       Int
+  currency          String
+  creditsMilli      Int?
+  externalReference String?         @unique
+  idempotencyKey    String          @unique
+  failureCode       String?
+  failureMessage    String?
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  user              User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  refunds           Refund[]
+  creditTransactions CreditTransaction[]
+
+  @@index([userId, createdAt])
+  @@index([provider, status, createdAt])
+}
+
+model Refund {
+  id                String        @id @default(uuid()) @db.Uuid
+  paymentId         String        @db.Uuid
+  amountMinor       Int
+  reason            String
+  status            PaymentStatus @default(PENDING)
+  externalReference String?       @unique
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  payment           Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, createdAt])
+}
+
+model CreditWallet {
+  id                       String              @id @default(uuid()) @db.Uuid
+  userId                   String?             @unique @db.Uuid
+  teamId                   String?             @unique @db.Uuid
+  availableMilliCredits    Int                 @default(0)
+  reservedMilliCredits     Int                 @default(0)
+  lifetimePurchasedMilli   Int                 @default(0)
+  lifetimeConsumedMilli    Int                 @default(0)
+  version                  Int                 @default(0)
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  user                     User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team                     Team?               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  transactions             CreditTransaction[]
+  usageMinutes             UsageMinute[]
+}
+
+model CreditTransaction {
+  id                String                @id @default(uuid()) @db.Uuid
+  walletId          String                @db.Uuid
+  paymentId         String?               @db.Uuid
+  roomId            String?               @db.Uuid
+  actorAdminId      String?               @db.Uuid
+  type              CreditTransactionType
+  amountMilli       Int
+  balanceAfterMilli Int
+  source            String
+  reason            String?
+  idempotencyKey    String                @unique
+  expiresAt         DateTime?
+  createdAt         DateTime              @default(now())
+  wallet            CreditWallet          @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  payment           Payment?              @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  room              CallRoom?             @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  actorAdmin        AdminUser?             @relation(fields: [actorAdminId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([roomId, createdAt])
+}
+
+model UsageMinute {
+  id                      String          @id @default(uuid()) @db.Uuid
+  walletId                String          @db.Uuid
+  roomId                  String          @db.Uuid
+  participantId           String?         @db.Uuid
+  mode                    UsageMode
+  quality                 QualityMode
+  billableMilliseconds    Int
+  milliCreditsPerMinute   Int
+  milliCreditsCharged     Int
+  meteringWindow          String          @unique
+  startedAt               DateTime
+  endedAt                 DateTime
+  createdAt               DateTime        @default(now())
+  wallet                  CreditWallet    @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  room                    CallRoom        @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  participant             CallParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([roomId, startedAt])
+}
+
+model AbuseReport {
+  id             String        @id @default(uuid()) @db.Uuid
+  reporterId     String        @db.Uuid
+  reportedUserId String?       @db.Uuid
+  roomId         String?       @db.Uuid
+  faceProfileId  String?       @db.Uuid
+  assignedAdminId String?      @db.Uuid
+  category       String
+  description    String
+  evidenceObjectKey String?
+  status         AbuseStatus   @default(OPEN)
+  resolution     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  reporter       User          @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  reportedUser   User?         @relation("ReportSubject", fields: [reportedUserId], references: [id], onDelete: SetNull)
+  room           CallRoom?     @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  faceProfile    FaceProfile?  @relation(fields: [faceProfileId], references: [id], onDelete: SetNull)
+  assignedAdmin  AdminUser?    @relation(fields: [assignedAdminId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([reportedUserId, createdAt])
+}
+
+model BlockedUser {
+  id        String   @id @default(uuid()) @db.Uuid
+  blockerId String   @db.Uuid
+  blockedId String   @db.Uuid
+  reason    String?
+  createdAt DateTime @default(now())
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model AdminUser {
+  id              String                @id @default(uuid()) @db.Uuid
+  userId          String                @unique @db.Uuid
+  role            AdminRole
+  permissions     String[]
+  mfaRequired     Boolean               @default(true)
+  active          Boolean               @default(true)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditLogs       AuditLog[]            @relation("AuditActorAdmin")
+  moderationEvents FaceModerationEvent[]
+  assignedReports AbuseReport[]
+  creditAdjustments CreditTransaction[]
+}
+
+model AuditLog {
+  id             String     @id @default(uuid()) @db.Uuid
+  actorUserId    String?    @db.Uuid
+  actorAdminId   String?    @db.Uuid
+  action         String
+  targetType     String
+  targetId       String?
+  beforeRedacted Json?
+  afterRedacted  Json?
+  requestId      String
+  ipHash         String?
+  createdAt      DateTime   @default(now())
+  actorUser      User?      @relation("AuditActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorAdmin     AdminUser? @relation("AuditActorAdmin", fields: [actorAdminId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+  @@index([targetType, targetId, createdAt])
+}
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String?   @db.Uuid
+  audience    String
+  channel     String
+  title       String
+  body        String
+  data        Json?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([audience, createdAt])
+}
+
+model AppSetting {
+  id             String   @id @default(uuid()) @db.Uuid
+  namespace      String
+  key            String
+  publicValue    Json?
+  encryptedValue String?
+  secretFingerprint String?
+  version        Int      @default(1)
+  updatedById    String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  updatedBy      User?    @relation("SettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([namespace, key])
+  @@index([namespace])
+}
+
+model ProviderHealth {
+  id             String         @id @default(uuid()) @db.Uuid
+  provider       String         @unique
+  status         ProviderStatus @default(UNCONFIGURED)
+  latencyMs      Int?
+  errorRedacted  String?
+  checkedAt      DateTime?
+  updatedAt      DateTime       @updatedAt
+}
+
+model Team {
+  id           String         @id @default(uuid()) @db.Uuid
+  ownerId      String         @db.Uuid
+  name         String
+  slug         String         @unique
+  branding     Json?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  owner        User           @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members      TeamMember[]
+  subscriptions Subscription[]
+  creditWallet CreditWallet?
+}
+
+model TeamMember {
+  id        String   @id @default(uuid()) @db.Uuid
+  teamId    String   @db.Uuid
+  userId    String   @db.Uuid
+  role      TeamRole @default(MEMBER)
+  createdAt DateTime @default(now())
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+}

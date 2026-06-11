@@ -1,0 +1,37 @@
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+} from "@nestjs/common";
+import type { AuthenticatedRequest } from "./request-user";
+import { PrismaService } from "./prisma.service";
+
+@Injectable()
+export class AdminGuard implements CanActivate {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const admin = await this.prisma.adminUser.findUnique({
+      where: { userId: request.user.sub },
+      select: {
+        id: true,
+        role: true,
+        permissions: true,
+        active: true,
+      },
+    });
+
+    if (!admin?.active) {
+      throw new ForbiddenException("Administrator access required");
+    }
+
+    request.admin = {
+      id: admin.id,
+      role: admin.role,
+      permissions: admin.permissions,
+    };
+    return true;
+  }
+}

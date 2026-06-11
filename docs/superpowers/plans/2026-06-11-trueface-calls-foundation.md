@@ -13,6 +13,7 @@
 ### Task 1: Repository and Toolchain
 
 **Files:**
+
 - Create: `package.json`
 - Create: `tsconfig.base.json`
 - Create: `.gitignore`
@@ -29,6 +30,7 @@
 ### Task 2: Shared Contracts and Database
 
 **Files:**
+
 - Create: `packages/contracts/src/*`
 - Create: `packages/database/prisma/schema.prisma`
 - Create: `packages/database/prisma/seed.ts`
@@ -44,6 +46,7 @@
 ### Task 3: API Platform and Security
 
 **Files:**
+
 - Create: `apps/api/src/main.ts`
 - Create: `apps/api/src/app.module.ts`
 - Create: `apps/api/src/common/*`
@@ -60,6 +63,7 @@
 ### Task 4: Encrypted Provider Settings
 
 **Files:**
+
 - Create: `apps/api/src/providers/*`
 - Create: `packages/providers/src/*`
 - Test: `apps/api/src/providers/*.spec.ts`
@@ -73,6 +77,7 @@
 ### Task 5: Credits, Plans, and Billing
 
 **Files:**
+
 - Create: `apps/api/src/credits/*`
 - Create: `apps/api/src/billing/*`
 - Test: `apps/api/src/credits/*.spec.ts`
@@ -87,6 +92,7 @@
 ### Task 6: Rooms, LiveKit, and Call Metering
 
 **Files:**
+
 - Create: `apps/api/src/rooms/*`
 - Create: `apps/api/src/calls/*`
 - Test: `apps/api/test/rooms.e2e-spec.ts`
@@ -100,6 +106,7 @@
 ### Task 7: Face Profiles, Consent, and Moderation
 
 **Files:**
+
 - Create: `apps/api/src/faces/*`
 - Create: `apps/api/src/moderation/*`
 - Test: `apps/api/test/faces.e2e-spec.ts`
@@ -113,6 +120,7 @@
 ### Task 8: Browser Media Engine
 
 **Files:**
+
 - Create: `packages/media-engine/src/*`
 - Test: `packages/media-engine/src/*.test.ts`
 
@@ -126,6 +134,7 @@
 ### Task 9: Web Design System and Marketing/Auth
 
 **Files:**
+
 - Create: `apps/web/app/globals.css`
 - Create: `packages/ui/src/*`
 - Create: `apps/web/app/(marketing)/*`
@@ -140,6 +149,7 @@
 ### Task 10: User Application
 
 **Files:**
+
 - Create: `apps/web/app/(app)/*`
 - Create: `apps/web/features/dashboard/*`
 - Create: `apps/web/features/faces/*`
@@ -153,6 +163,7 @@
 ### Task 11: Call Room
 
 **Files:**
+
 - Create: `apps/web/app/call/[slug]/*`
 - Create: `apps/web/features/call/*`
 - Test: `apps/web/tests/call-room.spec.ts`
@@ -166,6 +177,7 @@
 ### Task 12: Admin Dashboard
 
 **Files:**
+
 - Create: `apps/web/app/admin/*`
 - Create: `apps/web/features/admin/*`
 - Test: `apps/web/tests/admin.spec.ts`
@@ -178,6 +190,7 @@
 ### Task 13: Documentation and Operations
 
 **Files:**
+
 - Create: `README.md`
 - Create: `docs/deployment/emergent.md`
 - Create: `docs/operations/runbook.md`
@@ -199,4 +212,3 @@
 - [ ] Compare implementation screenshots to both approved concept boards.
 - [ ] Audit every requested page and release criterion.
 - [ ] Initialize Git, commit the complete repository, create a GitHub repository, and push when account authentication is available.
-

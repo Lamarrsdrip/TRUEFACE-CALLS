@@ -1,0 +1,14 @@
+.git
+.github
+.worktrees
+.next
+**/.next
+**/dist
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+npm-debug.log*
+design
+docs/superpowers

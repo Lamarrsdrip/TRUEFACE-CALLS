@@ -1,0 +1,39 @@
+{
+  "name": "trueface-calls",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Consent-first AI face video calling SaaS",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @trueface/contracts && npm run build --workspace @trueface/database && npm run build --workspace @trueface/providers && npm run build --workspace @trueface/media-engine && npm run build --workspace @trueface/api && npm run build --workspace @trueface/web",
+    "start": "concurrently -k -n api,web -c cyan,magenta \"npm run start --workspace @trueface/api\" \"npm run start --workspace @trueface/web\"",
+    "start:deploy": "npm run db:migrate:deploy && npm run db:seed && npm run start",
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev --workspace @trueface/api\" \"npm run dev --workspace @trueface/web\"",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run build --workspace @trueface/contracts && npm run build --workspace @trueface/database && npm run build --workspace @trueface/providers && npm run typecheck --workspace @trueface/media-engine && npm run typecheck --workspace @trueface/api && npm run typecheck --workspace @trueface/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "format:check": "prettier --check .",
+    "db:generate": "npm run generate --workspace @trueface/database",
+    "db:validate": "npm run validate --workspace @trueface/database",
+    "db:migrate:dev": "npm run migrate:dev --workspace @trueface/database",
+    "db:migrate:deploy": "npm run migrate:deploy --workspace @trueface/database",
+    "db:seed": "npm run seed --workspace @trueface/database"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "concurrently": "^10.0.3",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
+}
