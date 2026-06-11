@@ -63,6 +63,15 @@ export class FacesController {
     return this.faces.revoke(request.user.sub, id);
   }
 
+  @Post(":id/status")
+  setActive(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() body: { active: boolean },
+  ) {
+    return this.faces.setActive(request.user.sub, id, body.active);
+  }
+
   @Delete(":id")
   delete(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
     return this.faces.delete(request.user.sub, id);

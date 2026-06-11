@@ -2,18 +2,24 @@
 
 import { useState } from "react";
 import { ExternalLink, LoaderCircle } from "lucide-react";
+import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch, jsonBody } from "../lib/api";
 
-const packs = [
-  { creditsMilli: 25_000, amountMinor: 1_000, label: "25 credits" },
-  { creditsMilli: 75_000, amountMinor: 2_500, label: "75 credits" },
-  { creditsMilli: 200_000, amountMinor: 5_500, label: "200 credits" },
-];
+interface CreditPack {
+  key: string;
+  name: string;
+  creditsMilli: number;
+  amountMinor: number;
+  currency: string;
+}
 
 export function BuyCreditsForm() {
-  const [pack, setPack] = useState(packs[1]!);
+  const packs = useApiResource<{ packs: CreditPack[] }>(
+    "/billing/credit-packs",
+  );
+  const [selectedKey, setSelectedKey] = useState("");
   const [provider, setProvider] = useState<
-    "stripe" | "paystack" | "flutterwave"
+    "stripe" | "paystack" | "flutterwave" | "bank"
   >("stripe");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,15 +28,24 @@ export function BuyCreditsForm() {
     setBusy(true);
     setError(null);
     try {
+      const pack = packs.data?.packs.find(
+        (candidate) =>
+          candidate.key === (selectedKey || packs.data?.packs[0]?.key),
+      );
+      if (!pack) throw new Error("Choose a configured credit pack");
+      if (provider === "bank") {
+        window.location.assign(
+          `/billing/bank-transfer?type=credits&creditPackKey=${encodeURIComponent(pack.key)}`,
+        );
+        return;
+      }
       const result = await apiFetch<{ checkoutUrl: string }>(
         "/billing/checkout/credits",
         {
           method: "POST",
           ...jsonBody({
             provider,
-            creditsMilli: pack.creditsMilli,
-            amountMinor: pack.amountMinor,
-            currency: "USD",
+            packKey: pack.key,
           }),
         },
       );
@@ -46,19 +61,24 @@ export function BuyCreditsForm() {
     <div className="form-card form-grid">
       {error ? <div className="notice notice-danger">{error}</div> : null}
       <div className="credit-pack-grid">
-        {packs.map((item) => (
+        {packs.data?.packs.map((item, index) => (
           <button
-            key={item.creditsMilli}
+            key={item.key}
             type="button"
             className={
-              pack.creditsMilli === item.creditsMilli
+              (selectedKey || packs.data?.packs[0]?.key) === item.key
                 ? "credit-pack selected"
                 : "credit-pack"
             }
-            onClick={() => setPack(item)}
+            onClick={() => setSelectedKey(item.key)}
           >
-            <strong>{item.label}</strong>
-            <span>${(item.amountMinor / 100).toFixed(2)}</span>
+            <strong>
+              {item.name || `${item.creditsMilli / 1000} credits`}
+            </strong>
+            <span>
+              {item.currency} {(item.amountMinor / 100).toFixed(2)}
+              {index === 0 ? " · starter" : ""}
+            </span>
           </button>
         ))}
       </div>
@@ -76,6 +96,7 @@ export function BuyCreditsForm() {
           <option value="stripe">Stripe</option>
           <option value="paystack">Paystack</option>
           <option value="flutterwave">Flutterwave</option>
+          <option value="bank">Bank transfer</option>
         </select>
       </div>
       <div className="notice notice-info">
@@ -85,7 +106,7 @@ export function BuyCreditsForm() {
       <button
         className="button button-primary"
         onClick={checkout}
-        disabled={busy}
+        disabled={busy || packs.loading}
       >
         {busy ? (
           <LoaderCircle className="spin" size={17} />

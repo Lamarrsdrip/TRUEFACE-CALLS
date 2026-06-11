@@ -8,6 +8,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { createHash, randomBytes } from "node:crypto";
 import { AuthGuard } from "../common/auth.guard";
@@ -48,6 +49,18 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     const result = await this.auth.login(body, requestContext(request));
+    setSessionCookies(response, result.accessToken, result.refreshToken);
+    return stripTokens(result);
+  }
+
+  @Post("admin-login")
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async adminLogin(
+    @Body() body: unknown,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.adminLogin(body, requestContext(request));
     setSessionCookies(response, result.accessToken, result.refreshToken);
     return stripTokens(result);
   }

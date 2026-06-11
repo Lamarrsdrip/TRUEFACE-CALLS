@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -38,6 +39,14 @@ export class BillingService {
       orderBy: { createdAt: "desc" },
       take: 100,
     });
+  }
+
+  async creditPacks(userId: string) {
+    const entitlement = await this.assertPaidTopup(userId);
+    return {
+      plan: entitlement.plan,
+      packs: await this.configuredCreditPacks(),
+    };
   }
 
   async createSubscriptionCheckout(
@@ -95,19 +104,14 @@ export class BillingService {
     userId: string,
     input: {
       provider: "stripe" | "paystack" | "flutterwave";
-      creditsMilli: number;
-      amountMinor: number;
-      currency: string;
+      packKey: string;
     },
   ) {
-    if (
-      !Number.isInteger(input.creditsMilli) ||
-      input.creditsMilli < 1_000 ||
-      !Number.isInteger(input.amountMinor) ||
-      input.amountMinor < 100
-    ) {
-      throw new BadRequestException("Credit purchase amount is invalid");
-    }
+    await this.assertPaidTopup(userId);
+    const pack = (await this.configuredCreditPacks()).find(
+      (candidate) => candidate.key === input.packKey,
+    );
+    if (!pack) throw new BadRequestException("Credit pack is not configured");
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -123,30 +127,184 @@ export class BillingService {
           | "PAYSTACK"
           | "FLUTTERWAVE",
         type: "CREDIT_PURCHASE",
-        amountMinor: input.amountMinor,
-        currency: input.currency.toUpperCase(),
-        creditsMilli: input.creditsMilli,
+        amountMinor: pack.amountMinor,
+        currency: pack.currency,
+        creditsMilli: pack.creditsMilli,
         status: "PENDING",
         externalReference: reference,
         idempotencyKey: reference,
-        metadata: { creditsMilli: input.creditsMilli },
+        metadata: { creditsMilli: pack.creditsMilli, packKey: pack.key },
       },
     });
     return this.initializeCheckout({
       provider: input.provider,
       reference,
       email: user.email,
-      amountMinor: input.amountMinor,
-      currency: input.currency.toUpperCase(),
-      description: `${input.creditsMilli / 1000} TrueFace call credits`,
+      amountMinor: pack.amountMinor,
+      currency: pack.currency,
+      description: `${pack.creditsMilli / 1000} TrueFace call credits`,
       paymentId: payment.id,
       metadata: {
         paymentId: payment.id,
         userId,
-        creditsMilli: String(input.creditsMilli),
+        creditsMilli: String(pack.creditsMilli),
+        packKey: pack.key,
         type: "credits",
       },
     });
+  }
+
+  async createManualCheckout(
+    userId: string,
+    input: {
+      type: "subscription" | "credits";
+      planId?: string;
+      creditPackKey?: string;
+      transferReference: string;
+      proofObjectKey?: string;
+    },
+  ) {
+    const bank = await this.providers.getProvider("manual-bank");
+    if (bank.enabled !== "true" || !bank.bankName || !bank.accountNumber) {
+      throw new ServiceUnavailableException(
+        "Manual bank transfer is not enabled",
+      );
+    }
+    if (bank.proofRequired !== "false" && !input.proofObjectKey) {
+      throw new BadRequestException("Payment proof is required");
+    }
+    if (input.transferReference.trim().length < 4) {
+      throw new BadRequestException("Transfer reference is required");
+    }
+
+    let amountMinor: number;
+    let currency: string;
+    let creditsMilli: number | undefined;
+    let metadata: Record<string, string>;
+
+    if (input.type === "subscription") {
+      const plan = input.planId
+        ? await this.prisma.plan.findUnique({ where: { id: input.planId } })
+        : null;
+      if (!plan?.enabled || plan.priceMonthlyMinor <= 0) {
+        throw new NotFoundException("Paid plan not found");
+      }
+      amountMinor = plan.priceMonthlyMinor;
+      currency = plan.currency;
+      metadata = { planId: plan.id, planKey: plan.key };
+    } else {
+      await this.assertPaidTopup(userId);
+      const pack = (await this.configuredCreditPacks()).find(
+        (candidate) => candidate.key === input.creditPackKey,
+      );
+      if (!pack) {
+        throw new BadRequestException("Configured credit pack not found");
+      }
+      amountMinor = pack.amountMinor;
+      creditsMilli = pack.creditsMilli;
+      currency = pack.currency;
+      metadata = {
+        creditPackKey: String(input.creditPackKey),
+        creditsMilli: String(creditsMilli),
+      };
+    }
+
+    const reference = `manual_${crypto.randomUUID()}`;
+    const minimumMinor = Number(bank.minimumMinor ?? 0);
+    const maximumMinor = Number(bank.maximumMinor ?? Number.MAX_SAFE_INTEGER);
+    if (amountMinor < minimumMinor || amountMinor > maximumMinor) {
+      throw new BadRequestException(
+        "Payment amount is outside the configured bank-transfer limits",
+      );
+    }
+    const payment = await this.prisma.payment.create({
+      data: {
+        userId,
+        provider: "MANUAL",
+        type:
+          input.type === "subscription" ? "SUBSCRIPTION" : "CREDIT_PURCHASE",
+        status: "PENDING",
+        amountMinor,
+        currency: currency.toUpperCase(),
+        ...(creditsMilli ? { creditsMilli } : {}),
+        externalReference: reference,
+        idempotencyKey: reference,
+        transferReference: input.transferReference.trim().slice(0, 120),
+        expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+        ...(input.proofObjectKey
+          ? { proofObjectKey: input.proofObjectKey.slice(0, 500) }
+          : {}),
+        metadata: {
+          ...metadata,
+        },
+      },
+    });
+    return {
+      paymentId: payment.id,
+      status: payment.status,
+      review: "pending-finance-review",
+      bank: {
+        bankName: bank.bankName,
+        accountName: bank.accountName,
+        accountNumber: bank.accountNumber,
+        currency: bank.currency ?? currency,
+        instructions: bank.instructions,
+      },
+    };
+  }
+
+  async manualBank() {
+    const bank = await this.providers.getProvider("manual-bank");
+    if (bank.enabled !== "true" || !bank.bankName || !bank.accountNumber) {
+      throw new ServiceUnavailableException(
+        "Manual bank transfer is not enabled",
+      );
+    }
+    return {
+      enabled: true,
+      bankName: bank.bankName,
+      accountName: bank.accountName,
+      accountNumber: bank.accountNumber,
+      currency: bank.currency ?? "NGN",
+      instructions: bank.instructions ?? "",
+      minimumMinor: Number(bank.minimumMinor ?? 0),
+      maximumMinor: Number(bank.maximumMinor ?? 0),
+      proofRequired: bank.proofRequired !== "false",
+      manualReviewRequired: bank.manualReviewRequired !== "false",
+    };
+  }
+
+  async createManualProofUpload(
+    userId: string,
+    input: { contentType: string; sizeBytes: number },
+  ) {
+    if (
+      !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(
+        input.contentType,
+      ) ||
+      input.sizeBytes <= 0 ||
+      input.sizeBytes > 10 * 1024 * 1024
+    ) {
+      throw new BadRequestException(
+        "Payment proof must be JPEG, PNG, WebP, or PDF under 10 MB",
+      );
+    }
+    const extension =
+      input.contentType === "application/pdf"
+        ? "pdf"
+        : input.contentType === "image/png"
+          ? "png"
+          : input.contentType === "image/webp"
+            ? "webp"
+            : "jpg";
+    const objectKey = `payment-proofs/${userId}/${crypto.randomUUID()}.${extension}`;
+    return {
+      objectKey,
+      ...(await this.providers.createUploadUrl({
+        objectKey,
+        contentType: input.contentType,
+      })),
+    };
   }
 
   async handleStripe(rawBody: Buffer, signature: string | undefined) {
@@ -160,16 +318,20 @@ export class BillingService {
       signature,
       config.webhookSecret,
     );
+    let paymentId: string | undefined;
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
+      paymentId = session.metadata?.paymentId;
       await this.settlePayment(
-        session.metadata?.paymentId,
+        paymentId,
         session.id,
         session.subscription?.toString(),
       );
     } else if (event.type === "checkout.session.expired") {
-      await this.failPayment(event.data.object.metadata?.paymentId);
+      paymentId = event.data.object.metadata?.paymentId;
+      await this.failPayment(paymentId);
     }
+    await this.recordWebhook("stripe", event.id, event.type, paymentId);
     return { received: true };
   }
 
@@ -200,6 +362,12 @@ export class BillingService {
         event.data?.reference,
       );
     }
+    await this.recordWebhook(
+      "paystack",
+      event.data?.reference,
+      event.event,
+      event.data?.metadata?.paymentId,
+    );
     return { received: true };
   }
 
@@ -226,7 +394,42 @@ export class BillingService {
     ) {
       await this.settlePayment(event.data.meta?.paymentId, event.data.tx_ref);
     }
+    await this.recordWebhook(
+      "flutterwave",
+      event.data?.tx_ref,
+      event.event ?? "unknown",
+      event.data?.meta?.paymentId,
+    );
     return { received: true };
+  }
+
+  private async recordWebhook(
+    provider: string,
+    externalId: string | undefined,
+    eventType: string,
+    paymentId?: string,
+  ) {
+    await this.prisma.webhookEvent.upsert({
+      where: {
+        provider_externalId: {
+          provider,
+          externalId: externalId ?? `missing:${crypto.randomUUID()}`,
+        },
+      },
+      update: {
+        status: "PROCESSED",
+        processedAt: new Date(),
+        ...(paymentId ? { paymentId } : {}),
+      },
+      create: {
+        provider,
+        externalId: externalId ?? `missing:${crypto.randomUUID()}`,
+        eventType,
+        status: "PROCESSED",
+        processedAt: new Date(),
+        ...(paymentId ? { paymentId } : {}),
+      },
+    });
   }
 
   private async initializeCheckout(input: {
@@ -242,6 +445,11 @@ export class BillingService {
   }) {
     const appUrl = process.env.APP_URL ?? "http://localhost:3000";
     const config = await this.providers.getProvider(input.provider);
+    if (config.enabled === "false") {
+      throw new ServiceUnavailableException(
+        `${input.provider} checkout is disabled`,
+      );
+    }
 
     if (input.provider === "stripe") {
       if (!config.secretKey) {
@@ -393,6 +601,7 @@ export class BillingService {
           where: { id: wallet.id, version: wallet.version },
           data: {
             availableMilliCredits: { increment: payment.creditsMilli },
+            purchasedMilliCredits: { increment: payment.creditsMilli },
             lifetimePurchasedMilli: { increment: payment.creditsMilli },
             version: { increment: 1 },
           },
@@ -432,9 +641,87 @@ export class BillingService {
               currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
             },
           });
+          const plan = await tx.plan.findUniqueOrThrow({
+            where: { id: metadata.planId },
+          });
+          const wallet = await tx.creditWallet.findUniqueOrThrow({
+            where: { userId: payment.userId },
+          });
+          const resetAt = new Date(
+            Date.now() + plan.creditResetDays * 24 * 60 * 60 * 1000,
+          );
+          const updatedWallet = await tx.creditWallet.update({
+            where: { id: wallet.id, version: wallet.version },
+            data: {
+              includedMilliCredits: plan.monthlyCredits,
+              availableMilliCredits:
+                plan.monthlyCredits + wallet.purchasedMilliCredits,
+              includedResetAt: resetAt,
+              version: { increment: 1 },
+            },
+          });
+          await tx.creditTransaction.create({
+            data: {
+              walletId: wallet.id,
+              paymentId: payment.id,
+              type: "SUBSCRIPTION_GRANT",
+              amountMilli: plan.monthlyCredits,
+              balanceAfterMilli: updatedWallet.availableMilliCredits,
+              source: payment.provider.toLowerCase(),
+              reason: `${plan.name} included monthly credits`,
+              idempotencyKey: `subscription-payment:${payment.id}`,
+              expiresAt: resetAt,
+            },
+          });
         }
       }
     });
+  }
+
+  private async assertPaidTopup(userId: string) {
+    const entitlement = await this.prisma.subscription.findFirst({
+      where: { userId, status: "ACTIVE" },
+      include: { plan: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (
+      !entitlement ||
+      entitlement.plan.priceMonthlyMinor <= 0 ||
+      !entitlement.plan.creditTopupsAllowed
+    ) {
+      throw new ForbiddenException(
+        "An active paid plan with credit top-ups is required",
+      );
+    }
+    return entitlement;
+  }
+
+  private async configuredCreditPacks() {
+    const setting = await this.prisma.appSetting.findUnique({
+      where: {
+        namespace_key: { namespace: "billing", key: "credit-packs" },
+      },
+    });
+    const value =
+      setting?.publicValue && typeof setting.publicValue === "object"
+        ? (setting.publicValue as { packs?: Array<Record<string, unknown>> })
+        : {};
+    return (value.packs ?? [])
+      .map((pack) => ({
+        key: String(pack.key ?? ""),
+        name: String(pack.name ?? pack.key ?? ""),
+        creditsMilli: Number(pack.creditsMilli),
+        amountMinor: Number(pack.amountMinor),
+        currency: String(pack.currency ?? "USD").toUpperCase(),
+      }))
+      .filter(
+        (pack) =>
+          pack.key &&
+          Number.isInteger(pack.creditsMilli) &&
+          pack.creditsMilli >= 1_000 &&
+          Number.isInteger(pack.amountMinor) &&
+          pack.amountMinor >= 100,
+      );
   }
 
   private async failPayment(paymentId: string | undefined) {

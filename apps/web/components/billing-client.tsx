@@ -42,12 +42,18 @@ export function BillingClient() {
   );
   const payments = useApiResource<Payment[]>("/billing/payments");
   const [provider, setProvider] = useState<
-    "stripe" | "paystack" | "flutterwave"
+    "stripe" | "paystack" | "flutterwave" | "bank"
   >("stripe");
   const [error, setError] = useState<string | null>(null);
 
   async function choose(planId: string) {
     setError(null);
+    if (provider === "bank") {
+      window.location.assign(
+        `/billing/bank-transfer?type=subscription&planId=${encodeURIComponent(planId)}`,
+      );
+      return;
+    }
     try {
       const result = await apiFetch<{ checkoutUrl: string }>(
         "/billing/checkout/subscription",
@@ -78,6 +84,7 @@ export function BillingClient() {
             <option value="stripe">Stripe</option>
             <option value="paystack">Paystack</option>
             <option value="flutterwave">Flutterwave</option>
+            <option value="bank">Bank transfer</option>
           </select>
         }
       />

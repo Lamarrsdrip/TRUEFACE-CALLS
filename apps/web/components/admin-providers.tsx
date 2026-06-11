@@ -20,11 +20,13 @@ const definitions: Record<
   Array<{ key: string; label: string; secret?: boolean; placeholder?: string }>
 > = {
   livekit: [
+    { key: "enabled", label: "Enabled", placeholder: "true" },
     { key: "url", label: "LiveKit URL", placeholder: "wss://…" },
     { key: "apiKey", label: "API key", secret: true },
     { key: "apiSecret", label: "API secret", secret: true },
   ],
   storage: [
+    { key: "provider", label: "Storage provider", placeholder: "emergent-s3" },
     { key: "endpoint", label: "S3 endpoint" },
     { key: "region", label: "Region" },
     { key: "bucket", label: "Bucket" },
@@ -33,27 +35,75 @@ const definitions: Record<
     { key: "forcePathStyle", label: "Force path style" },
   ],
   stripe: [
+    { key: "enabled", label: "Enabled", placeholder: "true" },
+    { key: "mode", label: "Mode", placeholder: "test" },
     { key: "secretKey", label: "Secret key", secret: true },
     { key: "webhookSecret", label: "Webhook secret", secret: true },
+    { key: "webhookUrl", label: "Webhook URL" },
   ],
   paystack: [
+    { key: "enabled", label: "Enabled", placeholder: "true" },
+    { key: "mode", label: "Mode", placeholder: "test" },
     { key: "secretKey", label: "Secret key", secret: true },
     { key: "webhookSecret", label: "Webhook secret", secret: true },
   ],
   flutterwave: [
+    { key: "enabled", label: "Enabled", placeholder: "true" },
+    { key: "mode", label: "Mode", placeholder: "test" },
     { key: "secretKey", label: "Secret key", secret: true },
     { key: "encryptionKey", label: "Encryption key", secret: true },
     { key: "webhookHash", label: "Webhook hash", secret: true },
   ],
   email: [
-    { key: "provider", label: "Provider", placeholder: "resend" },
+    {
+      key: "provider",
+      label: "Provider",
+      placeholder: "resend | sendgrid | postmark | smtp",
+    },
     { key: "apiKey", label: "API key", secret: true },
     { key: "from", label: "Sender identity" },
+    { key: "host", label: "SMTP host" },
+    { key: "port", label: "SMTP port" },
+    { key: "username", label: "SMTP username" },
+    { key: "password", label: "SMTP password", secret: true },
   ],
   gpu: [
-    { key: "provider", label: "GPU provider" },
+    {
+      key: "provider",
+      label: "GPU provider",
+      placeholder: "local | runpod | modal | aws",
+    },
     { key: "endpoint", label: "Worker endpoint" },
     { key: "apiKey", label: "API key", secret: true },
+  ],
+  "manual-bank": [
+    { key: "enabled", label: "Enabled", placeholder: "false" },
+    { key: "bankName", label: "Bank name" },
+    { key: "accountName", label: "Account name" },
+    { key: "accountNumber", label: "Account number" },
+    { key: "currency", label: "Currency", placeholder: "NGN" },
+    { key: "minimumMinor", label: "Minimum amount (minor units)" },
+    { key: "maximumMinor", label: "Maximum amount (minor units)" },
+    { key: "proofRequired", label: "Proof required", placeholder: "true" },
+    {
+      key: "manualReviewRequired",
+      label: "Manual review required",
+      placeholder: "true",
+    },
+    { key: "instructions", label: "Transfer instructions" },
+  ],
+  monitoring: [
+    { key: "enabled", label: "Enabled", placeholder: "true" },
+    { key: "dsn", label: "Sentry DSN", secret: true },
+    { key: "logLevel", label: "Log level", placeholder: "info" },
+    { key: "webhookLogging", label: "Webhook logging", placeholder: "true" },
+  ],
+  whatsapp: [
+    { key: "enabled", label: "Enabled", placeholder: "false" },
+    { key: "phoneNumberId", label: "Phone number ID" },
+    { key: "businessAccountId", label: "Business account ID" },
+    { key: "token", label: "Access token", secret: true },
+    { key: "verifyToken", label: "Verify token", secret: true },
   ],
 };
 

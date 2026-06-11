@@ -11,13 +11,11 @@ import { nanoid } from "nanoid";
 import { PrismaService } from "../common/prisma.service";
 import { InviteSigner } from "../common/invite-signer";
 import { ProvidersService } from "../providers/providers.service";
+import { authSecret } from "../common/runtime-config";
 
 @Injectable()
 export class RoomsService {
-  private readonly signer = new InviteSigner(
-    process.env.AUTH_SECRET ??
-      "development-auth-secret-that-is-at-least-32-characters",
-  );
+  private readonly signer = new InviteSigner(authSecret());
 
   constructor(
     private readonly prisma: PrismaService,
@@ -26,15 +24,26 @@ export class RoomsService {
 
   async create(hostId: string, payload: unknown) {
     const input = createRoomSchema.parse(payload);
-    const subscription = await this.prisma.subscription.findFirst({
-      where: {
-        userId: hostId,
-        status: { in: ["TRIALING", "ACTIVE"] },
-      },
-      include: { plan: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const [host, subscription] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: hostId },
+        select: { roomCreationDisabled: true },
+      }),
+      this.prisma.subscription.findFirst({
+        where: {
+          userId: hostId,
+          status: { in: ["TRIALING", "ACTIVE"] },
+        },
+        include: { plan: true },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
+    if (host?.roomCreationDisabled) {
+      throw new ForbiddenException(
+        "Room creation is disabled for this account",
+      );
+    }
     if (!subscription) {
       throw new ForbiddenException("An active plan is required");
     }
@@ -329,6 +338,38 @@ export class RoomsService {
       },
       orderBy: { createdAt: "desc" },
       take: 100,
+    });
+  }
+
+  async userRooms(userId: string) {
+    const rooms = await this.prisma.callRoom.findMany({
+      where: {
+        OR: [{ hostId: userId }, { participants: { some: { userId } } }],
+      },
+      include: {
+        host: { select: { displayName: true, email: true } },
+        history: true,
+        _count: { select: { participants: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    return rooms.map((room) => {
+      const isHost = room.hostId === userId;
+      const inviteToken = isHost
+        ? this.signer.sign({
+            roomId: room.id,
+            inviteVersion: room.inviteVersion,
+            expiresAt: room.expiresAt,
+          })
+        : null;
+      return {
+        ...room,
+        isHost,
+        inviteUrl: inviteToken
+          ? `${process.env.APP_URL ?? "http://localhost:3000"}/call/${room.slug}?invite=${encodeURIComponent(inviteToken)}`
+          : null,
+      };
     });
   }
 

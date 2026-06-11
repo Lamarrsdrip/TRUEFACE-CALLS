@@ -14,7 +14,14 @@ interface PlanRecord {
   priceMonthlyMinor: number;
   monthlyCredits: number;
   maxFaceProfiles: number;
+  maxImagesPerProfile: number;
   maxParticipants: number;
+  maxCallMinutes: number;
+  maxGroupCalls: number;
+  allowedQualities: Array<"LOW" | "STANDARD" | "HD">;
+  watermarkRequired: boolean;
+  creditTopupsAllowed: boolean;
+  creditResetDays: number;
   groupCalls: boolean;
   voiceEffects: boolean;
   cloudGpu: boolean;
@@ -36,7 +43,16 @@ export function AdminPlans() {
         priceMonthlyMinor: Math.round(Number(form.get("price")) * 100),
         monthlyCredits: Math.round(Number(form.get("credits")) * 1000),
         maxFaceProfiles: Number(form.get("faces")),
+        maxImagesPerProfile: Number(form.get("imagesPerFace")),
         maxParticipants: Number(form.get("participants")),
+        maxCallMinutes: Number(form.get("callMinutes")),
+        maxGroupCalls: Number(form.get("groupCallsLimit")),
+        allowedQualities: ["LOW", "STANDARD", "HD"].filter(
+          (quality) => form.get(`quality-${quality}`) === "on",
+        ),
+        watermarkRequired: form.get("watermarkRequired") === "on",
+        creditTopupsAllowed: form.get("creditTopupsAllowed") === "on",
+        creditResetDays: Number(form.get("creditResetDays")),
         groupCalls: form.get("groupCalls") === "on",
         voiceEffects: form.get("voiceEffects") === "on",
         cloudGpu: form.get("cloudGpu") === "on",
@@ -123,8 +139,54 @@ export function AdminPlans() {
                   defaultValue={plan.maxParticipants}
                 />
               </div>
+              <div className="field">
+                <label>Images per profile</label>
+                <input
+                  name="imagesPerFace"
+                  type="number"
+                  min="1"
+                  defaultValue={plan.maxImagesPerProfile}
+                />
+              </div>
+              <div className="field">
+                <label>Max call minutes</label>
+                <input
+                  name="callMinutes"
+                  type="number"
+                  min="1"
+                  defaultValue={plan.maxCallMinutes}
+                />
+              </div>
+              <div className="field">
+                <label>Monthly group calls</label>
+                <input
+                  name="groupCallsLimit"
+                  type="number"
+                  min="0"
+                  defaultValue={plan.maxGroupCalls}
+                />
+              </div>
+              <div className="field">
+                <label>Credit reset days</label>
+                <input
+                  name="creditResetDays"
+                  type="number"
+                  min="1"
+                  defaultValue={plan.creditResetDays}
+                />
+              </div>
             </div>
             <div className="admin-checkboxes">
+              {(["LOW", "STANDARD", "HD"] as const).map((quality) => (
+                <label key={quality}>
+                  <input
+                    name={`quality-${quality}`}
+                    type="checkbox"
+                    defaultChecked={plan.allowedQualities.includes(quality)}
+                  />{" "}
+                  {quality} quality
+                </label>
+              ))}
               <label>
                 <input
                   name="groupCalls"
@@ -148,6 +210,22 @@ export function AdminPlans() {
                   defaultChecked={plan.cloudGpu}
                 />{" "}
                 Cloud GPU
+              </label>
+              <label>
+                <input
+                  name="watermarkRequired"
+                  type="checkbox"
+                  defaultChecked={plan.watermarkRequired}
+                />{" "}
+                AI watermark
+              </label>
+              <label>
+                <input
+                  name="creditTopupsAllowed"
+                  type="checkbox"
+                  defaultChecked={plan.creditTopupsAllowed}
+                />{" "}
+                Credit top-ups
               </label>
             </div>
             <button className="button button-primary">

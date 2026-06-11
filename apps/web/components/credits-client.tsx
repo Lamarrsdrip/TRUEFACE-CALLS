@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { CircleDollarSign, Plus, ReceiptText, Timer } from "lucide-react";
 import { useApiResource } from "../hooks/use-api-resource";
-import { creditsFromMilli, estimatedMinutes, formatDate } from "../lib/format";
+import { creditsFromMilli, formatDate } from "../lib/format";
 import {
   ErrorState,
   LoadingState,
@@ -15,8 +15,15 @@ import {
 interface Wallet {
   availableMilliCredits: number;
   reservedMilliCredits: number;
+  includedMilliCredits: number;
+  purchasedMilliCredits: number;
   lifetimePurchasedMilli: number;
   lifetimeConsumedMilli: number;
+  topUpAllowed: boolean;
+  activePaidSubscription: boolean;
+  nextResetAt: string | null;
+  exhausted: boolean;
+  plan: { name: string; monthlyCredits: number } | null;
 }
 
 interface Transaction {
@@ -39,9 +46,15 @@ export function CreditsClient() {
         title="Call credits"
         description="Credits are charged from immutable usage records, not browser timers."
         actions={
-          <Link href="/credits/buy" className="button button-primary">
-            <Plus size={17} /> Buy credits
-          </Link>
+          wallet.data?.topUpAllowed ? (
+            <Link href="/credits/buy" className="button button-primary">
+              <Plus size={17} /> Buy credits
+            </Link>
+          ) : (
+            <Link href="/billing" className="button button-primary">
+              Upgrade to buy credits
+            </Link>
+          )
         }
       />
       {wallet.loading ? <LoadingState label="Loading balance" /> : null}
@@ -55,15 +68,19 @@ export function CreditsClient() {
             icon={<CircleDollarSign size={17} />}
           />
           <StatCard
-            label="Estimated standard AI time"
-            value={`${estimatedMinutes(wallet.data.availableMilliCredits, 2_500)} min`}
-            detail="Actual rate is shown before activation"
+            label="Included balance"
+            value={creditsFromMilli(wallet.data.includedMilliCredits)}
+            detail={
+              wallet.data.nextResetAt
+                ? `resets ${formatDate(wallet.data.nextResetAt)}`
+                : "no reset scheduled"
+            }
             icon={<Timer size={17} />}
           />
           <StatCard
-            label="Lifetime purchased"
-            value={creditsFromMilli(wallet.data.lifetimePurchasedMilli)}
-            detail="credits"
+            label="Purchased balance"
+            value={creditsFromMilli(wallet.data.purchasedMilliCredits)}
+            detail="does not reset with monthly credits"
             icon={<ReceiptText size={17} />}
           />
           <StatCard
@@ -73,6 +90,12 @@ export function CreditsClient() {
             icon={<Timer size={17} />}
           />
         </section>
+      ) : null}
+      {wallet.data?.exhausted ? (
+        <div className="notice notice-danger mt-4">
+          Your AI credits are exhausted. Upgrade or buy an admin-configured
+          credit pack to resume AI face processing.
+        </div>
       ) : null}
       <section className="panel mt-4">
         <div className="panel-title">Credit history</div>

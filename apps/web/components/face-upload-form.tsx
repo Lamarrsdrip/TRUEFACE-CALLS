@@ -23,47 +23,76 @@ interface QualityResponse {
 
 export function FaceUploadForm() {
   const router = useRouter();
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<FaceQualityAnalysis | null>(null);
-  const [quality, setQuality] = useState<QualityResponse | null>(null);
+  const [images, setImages] = useState<
+    Array<{
+      file: File;
+      preview: string;
+      role: "FRONT" | "LEFT" | "RIGHT" | "LIGHTING" | "EXPRESSION";
+      analysis: FaceQualityAnalysis;
+      quality: QualityResponse;
+    }>
+  >([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consent, setConsent] = useState([false, false, false]);
-  const valid = Boolean(file && quality?.passed && consent.every(Boolean));
+  const valid = Boolean(
+    images.length &&
+    images.some((image) => image.role === "FRONT") &&
+    images.every((image) => image.quality.passed) &&
+    consent.every(Boolean),
+  );
 
   const checks = useMemo(
     () =>
-      quality
+      images[0]?.quality
         ? [
-            ["Good resolution", quality.checks.resolution],
-            ["One visible face", quality.checks.singleFace],
-            ["Image is sharp", quality.checks.sharpness],
-            ["Lighting is usable", quality.checks.lighting],
-            ["Face is centered", quality.checks.faceCoverage],
+            ["Good resolution", images[0].quality.checks.resolution],
+            ["One visible face", images[0].quality.checks.singleFace],
+            ["Image is sharp", images[0].quality.checks.sharpness],
+            ["Lighting is usable", images[0].quality.checks.lighting],
+            ["Face is centered", images[0].quality.checks.faceCoverage],
           ]
         : [],
-    [quality],
+    [images],
   );
 
-  async function chooseFile(next: File | undefined) {
-    if (!next) return;
+  async function chooseFiles(files: FileList | null) {
+    if (!files?.length) return;
     setBusy(true);
     setError(null);
-    setFile(next);
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(URL.createObjectURL(next));
     try {
-      const nextAnalysis = await analyzeFaceImage(next);
-      setAnalysis(nextAnalysis);
-      setQuality(
-        await apiFetch<QualityResponse>("/faces/quality-check", {
-          method: "POST",
-          ...jsonBody(nextAnalysis),
-        }),
+      images.forEach((image) => URL.revokeObjectURL(image.preview));
+      const roleOrder = [
+        "FRONT",
+        "LEFT",
+        "RIGHT",
+        "LIGHTING",
+        "EXPRESSION",
+      ] as const;
+      const selected = await Promise.all(
+        Array.from(files)
+          .slice(0, 10)
+          .map(async (file, index) => {
+            const analysis = await analyzeFaceImage(file);
+            const quality = await apiFetch<QualityResponse>(
+              "/faces/quality-check",
+              {
+                method: "POST",
+                ...jsonBody(analysis),
+              },
+            );
+            return {
+              file,
+              preview: URL.createObjectURL(file),
+              role: roleOrder[Math.min(index, roleOrder.length - 1)]!,
+              analysis,
+              quality,
+            };
+          }),
       );
+      setImages(selected);
     } catch (value) {
-      setQuality(null);
+      setImages([]);
       setError(
         value instanceof Error
           ? value.message
@@ -74,42 +103,67 @@ export function FaceUploadForm() {
     }
   }
 
+  function setRole(
+    index: number,
+    role: "FRONT" | "LEFT" | "RIGHT" | "LIGHTING" | "EXPRESSION",
+  ) {
+    setImages((current) =>
+      current.map((image, itemIndex) =>
+        itemIndex === index ? { ...image, role } : image,
+      ),
+    );
+  }
+
+  async function uploadImage(image: (typeof images)[number]) {
+    const upload = await apiFetch<{
+      objectKey: string;
+      url: string;
+      headers: Record<string, string>;
+    }>("/faces/upload-url", {
+      method: "POST",
+      ...jsonBody({
+        contentType: image.file.type,
+        sizeBytes: image.file.size,
+      }),
+    });
+    const response = await fetch(upload.url, {
+      method: "PUT",
+      headers: upload.headers,
+      body: image.file,
+    });
+    if (!response.ok) throw new Error("Private image upload failed");
+    return {
+      objectKey: upload.objectKey,
+      role: image.role,
+      mimeType: image.file.type,
+      sizeBytes: image.file.size,
+      width: image.analysis.width,
+      height: image.analysis.height,
+      quality: image.analysis,
+    };
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!valid || !file || !analysis) return;
+    if (!valid) return;
     const form = new FormData(event.currentTarget);
     setBusy(true);
     setError(null);
     try {
-      const upload = await apiFetch<{
-        objectKey: string;
-        url: string;
-        headers: Record<string, string>;
-      }>("/faces/upload-url", {
-        method: "POST",
-        ...jsonBody({
-          contentType: file.type,
-          sizeBytes: file.size,
-        }),
-      });
-      const uploadResponse = await fetch(upload.url, {
-        method: "PUT",
-        headers: upload.headers,
-        body: file,
-      });
-      if (!uploadResponse.ok) {
-        throw new Error("Private image upload failed");
-      }
+      const uploaded = await Promise.all(images.map(uploadImage));
+      const primary =
+        uploaded.find((image) => image.role === "FRONT") ?? uploaded[0]!;
       await apiFetch("/faces", {
         method: "POST",
         ...jsonBody({
           name: form.get("name"),
-          objectKey: upload.objectKey,
-          mimeType: file.type,
-          sizeBytes: file.size,
-          width: analysis.width,
-          height: analysis.height,
-          quality: analysis,
+          objectKey: primary.objectKey,
+          mimeType: primary.mimeType,
+          sizeBytes: primary.sizeBytes,
+          width: primary.width,
+          height: primary.height,
+          quality: primary.quality,
+          images: uploaded,
           consent: {
             ownsOrHasPermission: true,
             consentsToFaceUse: true,
@@ -131,24 +185,44 @@ export function FaceUploadForm() {
     <form className="face-upload-layout" onSubmit={submit}>
       <section className="panel">
         <div className="upload-preview">
-          {preview ? (
-            // User-selected local object URL is intentionally rendered directly.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="Selected face preview" />
+          {images.length ? (
+            <div className="face-upload-gallery">
+              {images.map((image, index) => (
+                <div key={`${image.file.name}-${index}`}>
+                  {/* User-selected local object URL. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={image.preview} alt={`${image.role} preview`} />
+                  <select
+                    value={image.role}
+                    onChange={(event) =>
+                      setRole(index, event.target.value as typeof image.role)
+                    }
+                  >
+                    <option value="FRONT">Front</option>
+                    <option value="LEFT">Left angle</option>
+                    <option value="RIGHT">Right angle</option>
+                    <option value="LIGHTING">Different lighting</option>
+                    <option value="EXPRESSION">Expression</option>
+                  </select>
+                  <span>{image.quality.score}/100</span>
+                </div>
+              ))}
+            </div>
           ) : (
             <div>
               <ImagePlus size={34} />
-              <strong>Choose a clear face photo</strong>
-              <span>JPEG, PNG, or WebP up to 10 MB</span>
+              <strong>Choose clear face photos</strong>
+              <span>Upload 3-5 angles for stronger replacement quality</span>
             </div>
           )}
           <label className="button button-secondary">
-            {preview ? "Choose another" : "Choose photo"}
+            {images.length ? "Replace selection" : "Choose photos"}
             <input
               hidden
               type="file"
+              multiple
               accept="image/jpeg,image/png,image/webp"
-              onChange={(event) => void chooseFile(event.target.files?.[0])}
+              onChange={(event) => void chooseFiles(event.target.files)}
             />
           </label>
         </div>
@@ -161,18 +235,18 @@ export function FaceUploadForm() {
             create.
           </p>
         </div>
-        {busy && !quality ? (
+        {busy && !images.length ? (
           <div className="state-message !min-h-24">
             <LoaderCircle className="spin" size={20} />
             Running on-device face quality checks
           </div>
         ) : null}
         {error ? <div className="notice notice-danger">{error}</div> : null}
-        {quality ? (
+        {images.length ? (
           <div className="quality-list">
             <div className="quality-score">
-              <span>Quality score</span>
-              <b>{quality.score}/100</b>
+              <span>Front image score</span>
+              <b>{images[0]?.quality.score}/100</b>
             </div>
             {checks.map(([label, passed]) => (
               <div key={String(label)}>
@@ -189,6 +263,11 @@ export function FaceUploadForm() {
         <div className="field">
           <label htmlFor="name">Profile name</label>
           <input id="name" name="name" placeholder="My call profile" required />
+        </div>
+        <div className="notice notice-info">
+          Upload a front-facing photo, slight left and right angles, neutral or
+          smiling expressions, and good lighting. Bad images are rejected
+          instead of silently lowering profile quality.
         </div>
         {[
           "I confirm this image is mine or I have permission to use it.",

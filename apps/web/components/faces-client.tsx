@@ -10,7 +10,7 @@ import {
   StatusBadge,
 } from "./ui";
 import { useApiResource } from "../hooks/use-api-resource";
-import { apiFetch } from "../lib/api";
+import { apiFetch, jsonBody } from "../lib/api";
 
 interface FaceProfile {
   id: string;
@@ -18,6 +18,10 @@ interface FaceProfile {
   previewUrl: string | null;
   qualityScore: number;
   moderationStatus: string;
+  active: boolean;
+  readinessScore: number;
+  readinessLabel: string;
+  images: Array<{ id: string; role: string; qualityScore: number }>;
   createdAt: string;
 }
 
@@ -30,6 +34,14 @@ export function FacesClient() {
       return;
     }
     await apiFetch(`/faces/${id}`, { method: "DELETE" });
+    await refresh();
+  }
+
+  async function toggle(face: FaceProfile) {
+    await apiFetch(`/faces/${face.id}/status`, {
+      method: "POST",
+      ...jsonBody({ active: !face.active }),
+    });
     await refresh();
   }
 
@@ -87,11 +99,24 @@ export function FacesClient() {
                     {face.moderationStatus.toLowerCase()}
                   </StatusBadge>
                 </div>
-                <p>Quality score {face.qualityScore}/100</p>
+                <p>
+                  {face.readinessLabel.toLowerCase()} readiness ·{" "}
+                  {face.readinessScore}/100 · {face.images.length} image
+                  {face.images.length === 1 ? "" : "s"}
+                </p>
+                <div className="face-readiness-track">
+                  <span style={{ width: `${face.readinessScore}%` }} />
+                </div>
                 <div className="face-card-actions">
                   <span>
                     <ShieldCheck size={15} /> Consent recorded
                   </span>
+                  <button
+                    className="button button-ghost button-sm"
+                    onClick={() => void toggle(face)}
+                  >
+                    {face.active ? "Deactivate" : "Activate"}
+                  </button>
                   <button
                     className="icon-button"
                     aria-label={`Delete ${face.name}`}

@@ -11,6 +11,7 @@ import {
 import { AdminGuard } from "../common/admin.guard";
 import { AuthGuard } from "../common/auth.guard";
 import type { AuthenticatedRequest } from "../common/request-user";
+import { AdminPermission } from "../common/admin-permission";
 import { ProvidersService } from "./providers.service";
 
 @Controller("admin/providers")
@@ -24,6 +25,7 @@ export class ProvidersController {
   }
 
   @Put(":provider")
+  @AdminPermission("providers:write")
   async update(
     @Param("provider") provider: string,
     @Body() body: { values?: Record<string, unknown> },
@@ -42,6 +44,7 @@ export class ProvidersController {
   }
 
   @Post(":provider/test")
+  @AdminPermission("providers:write")
   test(@Param("provider") provider: string) {
     return this.providers.test(provider);
   }

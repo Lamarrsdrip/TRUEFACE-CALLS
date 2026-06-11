@@ -5,8 +5,9 @@ import {
   RequestMethod,
 } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { APP_GUARD } from "@nestjs/core";
 import { JwtModule } from "@nestjs/jwt";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
 import { BillingModule } from "./billing/billing.module";
@@ -20,15 +21,14 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { ProvidersModule } from "./providers/providers.module";
 import { RoomsModule } from "./rooms/rooms.module";
 import { SafetyModule } from "./safety/safety.module";
+import { authSecret } from "./common/runtime-config";
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     JwtModule.register({
       global: true,
-      secret:
-        process.env.AUTH_SECRET ??
-        "development-auth-secret-that-is-at-least-32-characters",
+      secret: authSecret(),
     }),
     ThrottlerModule.forRoot([
       {
@@ -49,6 +49,7 @@ import { SafetyModule } from "./safety/safety.module";
     NotificationsModule,
     AdminModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

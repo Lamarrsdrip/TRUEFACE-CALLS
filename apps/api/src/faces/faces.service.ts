@@ -80,21 +80,33 @@ export class FacesService {
       width: number;
       height: number;
       quality: QualityInput;
+      images?: Array<{
+        objectKey: string;
+        role: "FRONT" | "LEFT" | "RIGHT" | "LIGHTING" | "EXPRESSION";
+        mimeType: string;
+        sizeBytes: number;
+        width: number;
+        height: number;
+        quality: QualityInput;
+      }>;
       consent: unknown;
     },
     context: { ipHash?: string; userAgent?: string },
   ) {
-    if (!input.objectKey.startsWith(`faces/${userId}/`)) {
-      throw new ForbiddenException("Face object does not belong to this user");
-    }
     const consent = consentAttestationSchema.parse(input.consent);
-    const quality = this.qualityCheck(input.quality);
-    if (!quality.passed) {
-      throw new BadRequestException({
-        message: "Face quality check failed",
-        quality,
-      });
-    }
+    const submittedImages = input.images?.length
+      ? input.images
+      : [
+          {
+            objectKey: input.objectKey,
+            role: "FRONT" as const,
+            mimeType: input.mimeType,
+            sizeBytes: input.sizeBytes,
+            width: input.width,
+            height: input.height,
+            quality: input.quality,
+          },
+        ];
 
     const subscription = await this.prisma.subscription.findFirst({
       where: { userId, status: { in: ["TRIALING", "ACTIVE"] } },
@@ -104,6 +116,33 @@ export class FacesService {
     if (!subscription) {
       throw new ForbiddenException("An active plan is required");
     }
+    if (submittedImages.length > subscription.plan.maxImagesPerProfile) {
+      throw new ForbiddenException(
+        `Your plan supports ${subscription.plan.maxImagesPerProfile} images per profile`,
+      );
+    }
+    if (!submittedImages.some((image) => image.role === "FRONT")) {
+      throw new BadRequestException("A front-facing image is required");
+    }
+    const analyzedImages = submittedImages.map((image) => {
+      if (!image.objectKey.startsWith(`faces/${userId}/`)) {
+        throw new ForbiddenException(
+          "A face object does not belong to this user",
+        );
+      }
+      const quality = this.qualityCheck(image.quality);
+      if (!quality.passed) {
+        throw new BadRequestException({
+          message: `The ${image.role.toLowerCase()} image failed quality checks`,
+          quality,
+        });
+      }
+      return { ...image, quality };
+    });
+    const primary =
+      analyzedImages.find((image) => image.role === "FRONT") ??
+      analyzedImages[0]!;
+    const readiness = profileReadiness(analyzedImages);
     const profileCount = await this.prisma.faceProfile.count({
       where: { userId, deletedAt: null },
     });
@@ -126,7 +165,13 @@ export class FacesService {
           create: {
             status: "APPROVED" as const,
             reasonCodes: ["AUTO_QUALITY_POLICY"],
-            modelSignals: quality,
+            modelSignals: {
+              readiness,
+              images: analyzedImages.map((image) => ({
+                role: image.role,
+                quality: image.quality,
+              })),
+            },
           },
         }
       : null;
@@ -135,13 +180,15 @@ export class FacesService {
       data: {
         userId,
         name: input.name.trim().slice(0, 80),
-        objectKey: input.objectKey,
-        mimeType: input.mimeType,
-        sizeBytes: input.sizeBytes,
-        width: input.width,
-        height: input.height,
-        qualityScore: quality.score,
-        qualitySignals: quality,
+        objectKey: primary.objectKey,
+        mimeType: primary.mimeType,
+        sizeBytes: primary.sizeBytes,
+        width: primary.width,
+        height: primary.height,
+        qualityScore: primary.quality.score,
+        qualitySignals: primary.quality,
+        readinessScore: readiness.score,
+        readinessLabel: readiness.label,
         moderationStatus: autoApprove ? "APPROVED" : "PENDING",
         consentLogs: {
           create: {
@@ -156,8 +203,20 @@ export class FacesService {
           },
         },
         ...(moderationEvents ? { moderationEvents } : {}),
+        images: {
+          create: analyzedImages.map((image) => ({
+            objectKey: image.objectKey,
+            role: image.role,
+            mimeType: image.mimeType,
+            sizeBytes: image.sizeBytes,
+            width: image.width,
+            height: image.height,
+            qualityScore: image.quality.score,
+            qualitySignals: image.quality,
+          })),
+        },
       },
-      include: { consentLogs: true },
+      include: { consentLogs: true, images: true },
     });
   }
 
@@ -169,6 +228,7 @@ export class FacesService {
           orderBy: { acceptedAt: "desc" },
           take: 1,
         },
+        images: { orderBy: { createdAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -176,6 +236,12 @@ export class FacesService {
       profiles.map(async (profile) => ({
         ...profile,
         previewUrl: await this.safeDownloadUrl(profile.objectKey),
+        images: await Promise.all(
+          profile.images.map(async (image) => ({
+            ...image,
+            previewUrl: await this.safeDownloadUrl(image.objectKey),
+          })),
+        ),
       })),
     );
   }
@@ -191,7 +257,7 @@ export class FacesService {
         },
       },
     });
-    if (!profile) {
+    if (!profile || !profile.active) {
       throw new NotFoundException("Face profile not found");
     }
     assertFaceProfileCanActivate({
@@ -225,9 +291,21 @@ export class FacesService {
     return { revoked: true };
   }
 
+  async setActive(userId: string, profileId: string, active: boolean) {
+    const profile = await this.prisma.faceProfile.findFirst({
+      where: { id: profileId, userId, deletedAt: null },
+    });
+    if (!profile) throw new NotFoundException("Face profile not found");
+    return this.prisma.faceProfile.update({
+      where: { id: profileId },
+      data: { active },
+    });
+  }
+
   async delete(userId: string, profileId: string) {
     const profile = await this.prisma.faceProfile.findFirst({
       where: { id: profileId, userId, deletedAt: null },
+      include: { images: true },
     });
     if (!profile) {
       throw new NotFoundException("Face profile not found");
@@ -238,21 +316,31 @@ export class FacesService {
       data: { deletionRequestedAt: new Date() },
     });
     await this.providers.deleteObject(profile.objectKey);
+    for (const image of profile.images) {
+      if (image.objectKey !== profile.objectKey) {
+        await this.providers.deleteObject(image.objectKey);
+      }
+    }
     if (profile.thumbnailKey) {
       await this.providers.deleteObject(profile.thumbnailKey);
     }
-    await this.prisma.faceProfile.update({
-      where: { id: profileId },
-      data: {
-        deletedAt: new Date(),
-        consentRevokedAt: new Date(),
-        objectKey: `deleted/${profile.id}`,
-        thumbnailKey: null,
-      },
-    });
-    await this.prisma.consentLog.updateMany({
-      where: { faceProfileId: profileId, revokedAt: null },
-      data: { revokedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.faceProfileImage.deleteMany({
+        where: { faceProfileId: profileId },
+      });
+      await tx.faceProfile.update({
+        where: { id: profileId },
+        data: {
+          deletedAt: new Date(),
+          consentRevokedAt: new Date(),
+          objectKey: `deleted/${profile.id}`,
+          thumbnailKey: null,
+        },
+      });
+      await tx.consentLog.updateMany({
+        where: { faceProfileId: profileId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
     return { deleted: true };
   }
@@ -264,4 +352,30 @@ export class FacesService {
       return null;
     }
   }
+}
+
+function profileReadiness(
+  images: Array<{
+    role: string;
+    quality: { score: number };
+  }>,
+) {
+  const average =
+    images.reduce((sum, image) => sum + image.quality.score, 0) / images.length;
+  const roles = new Set(images.map((image) => image.role));
+  const diversityBonus = Math.min(20, Math.max(0, roles.size - 1) * 5);
+  const volumeBonus = Math.min(10, Math.max(0, images.length - 1) * 2.5);
+  const score = Math.min(
+    100,
+    Math.round(average * 0.7 + diversityBonus + volumeBonus),
+  );
+  const label =
+    score >= 90
+      ? "EXCELLENT"
+      : score >= 75
+        ? "GOOD"
+        : score >= 55
+          ? "FAIR"
+          : "POOR";
+  return { score, label };
 }

@@ -115,11 +115,11 @@ enum AbuseStatus {
 
 enum AdminRole {
   SUPER_ADMIN
-  OPERATIONS
-  MODERATOR
-  BILLING
+  ADMIN
   SUPPORT
-  ANALYST
+  FINANCE
+  MODERATOR
+  VIEWER
 }
 
 enum ProviderStatus {
@@ -146,6 +146,7 @@ model User {
   locale                String            @default("en")
   timezone              String            @default("UTC")
   lastLoginAt           DateTime?
+  roomCreationDisabled  Boolean           @default(false)
   deletionScheduledAt   DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -231,6 +232,9 @@ model FaceProfile {
   qualityScore     Int
   qualitySignals   Json
   moderationStatus ModerationStatus        @default(PENDING)
+  active           Boolean                 @default(true)
+  readinessScore   Int                     @default(0)
+  readinessLabel   String                  @default("POOR")
   metadataEncrypted String?
   consentRevokedAt DateTime?
   deletionRequestedAt DateTime?
@@ -241,9 +245,28 @@ model FaceProfile {
   consentLogs      ConsentLog[]
   moderationEvents FaceModerationEvent[]
   reports          AbuseReport[]
+  images           FaceProfileImage[]
 
   @@index([userId, deletedAt])
   @@index([moderationStatus, createdAt])
+}
+
+model FaceProfileImage {
+  id             String      @id @default(uuid()) @db.Uuid
+  faceProfileId  String      @db.Uuid
+  objectKey      String      @unique
+  role           String
+  mimeType       String
+  sizeBytes      Int
+  width          Int
+  height         Int
+  qualityScore   Int
+  qualitySignals Json
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  faceProfile    FaceProfile @relation(fields: [faceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([faceProfileId, role])
 }
 
 model ConsentLog {
@@ -365,11 +388,18 @@ model Plan {
   description        String
   monthlyCredits     Int
   maxFaceProfiles    Int
+  maxImagesPerProfile Int           @default(1)
   maxParticipants    Int
+  maxCallMinutes     Int            @default(60)
+  maxGroupCalls      Int            @default(0)
   allowedQualities   QualityMode[]
   groupCalls         Boolean
+  watermarkRequired Boolean         @default(true)
+  creditTopupsAllowed Boolean       @default(true)
+  creditResetDays    Int            @default(30)
   voiceEffects       Boolean
   cloudGpu           Boolean
+  featureAccess      Json?
   priceMonthlyMinor  Int
   currency           String         @default("USD")
   providerPriceRefs  Json?
@@ -419,10 +449,17 @@ model Payment {
   idempotencyKey    String          @unique
   failureCode       String?
   failureMessage    String?
+  proofObjectKey    String?
+  transferReference String?
+  expiresAt         DateTime?
+  reviewedAt        DateTime?
+  reviewedByAdminId String?         @db.Uuid
+  adminNotes        String?
   metadata          Json?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   user              User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  reviewedByAdmin   AdminUser?       @relation("ManualPaymentReviewer", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
   refunds           Refund[]
   creditTransactions CreditTransaction[]
 
@@ -450,6 +487,11 @@ model CreditWallet {
   teamId                   String?             @unique @db.Uuid
   availableMilliCredits    Int                 @default(0)
   reservedMilliCredits     Int                 @default(0)
+  includedMilliCredits     Int                 @default(0)
+  purchasedMilliCredits    Int                 @default(0)
+  reservedIncludedMilli    Int                 @default(0)
+  reservedPurchasedMilli   Int                 @default(0)
+  includedResetAt          DateTime?
   lifetimePurchasedMilli   Int                 @default(0)
   lifetimeConsumedMilli    Int                 @default(0)
   version                  Int                 @default(0)
@@ -549,7 +591,10 @@ model AdminUser {
   role            AdminRole
   permissions     String[]
   mfaRequired     Boolean               @default(true)
+  mfaEnabled      Boolean               @default(false)
   active          Boolean               @default(true)
+  lastLoginAt     DateTime?
+  lastLoginIpHash String?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -557,6 +602,7 @@ model AdminUser {
   moderationEvents FaceModerationEvent[]
   assignedReports AbuseReport[]
   creditAdjustments CreditTransaction[]
+  reviewedPayments Payment[]             @relation("ManualPaymentReviewer")
 }
 
 model AuditLog {
@@ -576,6 +622,23 @@ model AuditLog {
 
   @@index([action, createdAt])
   @@index([targetType, targetId, createdAt])
+}
+
+model WebhookEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  provider        String
+  eventType       String
+  externalId      String?
+  status          String
+  paymentId       String?  @db.Uuid
+  errorRedacted   String?
+  payloadRedacted Json?
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  @@unique([provider, externalId])
+  @@index([status, createdAt])
+  @@index([provider, createdAt])
 }
 
 model Notification {

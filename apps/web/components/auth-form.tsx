@@ -111,6 +111,88 @@ export function LoginForm() {
   );
 }
 
+export function AdminLoginForm() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/auth/admin-login", {
+        method: "POST",
+        ...jsonBody({
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      });
+      router.replace("/admin/dashboard");
+      router.refresh();
+    } catch (value) {
+      setError(
+        value instanceof Error ? value.message : "Administrator sign in failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="admin-login-page">
+      <section className="admin-login-card">
+        <Brand />
+        <div>
+          <span className="admin-console-label">Restricted operations</span>
+          <h1>TrueFace Admin Console</h1>
+          <p>
+            Secure access for platform operations, finance, support, and
+            trust-and-safety teams.
+          </p>
+        </div>
+        <form className="form-grid" onSubmit={submit}>
+          {error ? (
+            <div className="notice notice-danger">
+              <AlertCircle size={18} />
+              {error}
+            </div>
+          ) : null}
+          <div className="field">
+            <label htmlFor="admin-email">Admin email</label>
+            <input
+              id="admin-email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="admin-password">Password</label>
+            <input
+              id="admin-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <button className="button button-primary" disabled={busy}>
+            {busy ? <LoaderCircle className="spin" size={17} /> : null}
+            Enter admin console
+          </button>
+        </form>
+        <div className="admin-login-security">
+          Login attempts are rate-limited and audited. The account model is
+          ready for enforced TOTP authentication.
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function SignupForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);

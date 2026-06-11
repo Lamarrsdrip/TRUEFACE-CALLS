@@ -31,6 +31,12 @@ const SECRET_KEYS = new Set([
   "secretAccessKey",
   "encryptionKey",
   "webhookHash",
+  "clientSecret",
+  "password",
+  "token",
+  "verifyToken",
+  "privateKey",
+  "dsn",
 ]);
 
 @Injectable()

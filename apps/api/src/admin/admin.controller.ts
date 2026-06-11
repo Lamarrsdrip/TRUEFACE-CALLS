@@ -13,6 +13,7 @@ import {
 import { AdminGuard } from "../common/admin.guard";
 import { AuthGuard } from "../common/auth.guard";
 import type { AuthenticatedRequest } from "../common/request-user";
+import { AdminPermission } from "../common/admin-permission";
 import { AdminService } from "./admin.service";
 
 @Controller("admin")
@@ -26,11 +27,17 @@ export class AdminController {
   }
 
   @Get("users")
-  users() {
-    return this.admin.users();
+  users(@Query("search") search?: string) {
+    return this.admin.users(search);
+  }
+
+  @Get("users/:id")
+  user(@Param("id") id: string) {
+    return this.admin.user(id);
   }
 
   @Patch("users/:id/status")
+  @AdminPermission("users:write")
   updateUser(
     @Param("id") id: string,
     @Req() request: AuthenticatedRequest,
@@ -40,19 +47,60 @@ export class AdminController {
     return this.admin.updateUserStatus(id, request.admin!.id, body.status);
   }
 
+  @Patch("users/:id/room-access")
+  @AdminPermission("users:write")
+  updateRoomAccess(
+    @Param("id") id: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { disabled: boolean },
+  ) {
+    return this.admin.updateRoomAccess(id, request.admin!.id, body.disabled);
+  }
+
   @Get("subscriptions")
   subscriptions() {
     return this.admin.subscriptions();
   }
 
   @Get("payments")
-  payments() {
-    return this.admin.payments();
+  payments(
+    @Query("provider") provider?: string,
+    @Query("status") status?: string,
+  ) {
+    return this.admin.payments({
+      ...(provider ? { provider } : {}),
+      ...(status ? { status } : {}),
+    });
+  }
+
+  @Post("payments/:id/decision")
+  @AdminPermission("billing:write")
+  decidePayment(
+    @Param("id") id: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { decision: "APPROVE" | "REJECT"; reason?: string },
+  ) {
+    return this.admin.decideManualPayment(id, request.admin!.id, body);
+  }
+
+  @Get("payments/:id/proof")
+  paymentProof(@Param("id") id: string) {
+    return this.admin.manualPaymentProof(id);
   }
 
   @Get("calls")
   calls() {
     return this.admin.calls();
+  }
+
+  @Post("calls/:id/end")
+  @AdminPermission("calls:write")
+  endCall(
+    @Param("id") id: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { reason?: string },
+  ) {
+    return this.admin.endCall(id, request.admin!.id, body.reason);
   }
 
   @Get("usage")
@@ -66,6 +114,7 @@ export class AdminController {
   }
 
   @Post("faces/:id/decision")
+  @AdminPermission("faces:write")
   decideFace(
     @Param("id") id: string,
     @Req() request: AuthenticatedRequest,
@@ -79,12 +128,23 @@ export class AdminController {
     return this.admin.decideFace(id, request.admin!.id, body);
   }
 
+  @Post("faces/:id/delete")
+  @AdminPermission("faces:write")
+  deleteFace(
+    @Param("id") id: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { reason?: string },
+  ) {
+    return this.admin.deleteFace(id, request.admin!.id, body.reason);
+  }
+
   @Get("abuse-reports")
   reports() {
     return this.admin.reports();
   }
 
   @Patch("abuse-reports/:id")
+  @AdminPermission("reports:write")
   updateReport(
     @Param("id") id: string,
     @Req() request: AuthenticatedRequest,
@@ -98,6 +158,7 @@ export class AdminController {
   }
 
   @Post("credits/adjust")
+  @AdminPermission("credits:write")
   adjustCredits(
     @Req() request: AuthenticatedRequest,
     @Body() body: { userId: string; amountMilli: number; reason: string },
@@ -111,6 +172,7 @@ export class AdminController {
   }
 
   @Put("plans/:id")
+  @AdminPermission("plans:write")
   updatePlan(
     @Param("id") id: string,
     @Req() request: AuthenticatedRequest,
@@ -124,7 +186,14 @@ export class AdminController {
     return this.admin.settings(namespace);
   }
 
+  @Get("deployment")
+  @AdminPermission("settings:read")
+  deployment() {
+    return this.admin.deploymentStatus();
+  }
+
   @Put("settings/:namespace/:key")
+  @AdminPermission("settings:write")
   setSetting(
     @Param("namespace") namespace: string,
     @Param("key") key: string,
@@ -141,6 +210,7 @@ export class AdminController {
   }
 
   @Post("notifications/broadcast")
+  @AdminPermission("settings:write")
   broadcast(
     @Req() request: AuthenticatedRequest,
     @Body() body: { title: string; body: string; audience?: string },
@@ -151,5 +221,10 @@ export class AdminController {
   @Get("audit-logs")
   auditLogs() {
     return this.admin.auditLogs();
+  }
+
+  @Get("audit-logs/export")
+  auditExport() {
+    return this.admin.auditExport();
   }
 }

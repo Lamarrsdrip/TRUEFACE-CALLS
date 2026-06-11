@@ -68,6 +68,10 @@ export class AuthService {
           creditWallet: {
             create: {
               availableMilliCredits: trialPlan.monthlyCredits,
+              includedMilliCredits: trialPlan.monthlyCredits,
+              includedResetAt: new Date(
+                Date.now() + trialPlan.creditResetDays * 24 * 60 * 60 * 1000,
+              ),
             },
           },
           subscriptions: {
@@ -152,6 +156,69 @@ export class AuthService {
 
     return {
       user: publicUser(user),
+      ...(await this.createSession(user, context)),
+    };
+  }
+
+  async adminLogin(
+    payload: unknown,
+    context: { ipHash?: string; userAgent?: string },
+  ) {
+    const input = loginSchema.parse(payload);
+    const user = await this.prisma.user.findUnique({
+      where: { email: input.email.toLowerCase() },
+      include: { adminProfile: true },
+    });
+
+    if (
+      !user ||
+      user.status !== UserStatus.ACTIVE ||
+      !user.adminProfile?.active ||
+      !(await argon2.verify(user.passwordHash, input.password))
+    ) {
+      throw new UnauthorizedException("Admin email or password is incorrect");
+    }
+
+    const loggedInAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: loggedInAt },
+      }),
+      this.prisma.adminUser.update({
+        where: { id: user.adminProfile.id },
+        data: {
+          lastLoginAt: loggedInAt,
+          ...(context.ipHash ? { lastLoginIpHash: context.ipHash } : {}),
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          actorAdminId: user.adminProfile.id,
+          action: "admin.login",
+          targetType: "admin_user",
+          targetId: user.adminProfile.id,
+          afterRedacted: {
+            role: user.adminProfile.role,
+            mfaRequired: user.adminProfile.mfaRequired,
+            mfaEnabled: user.adminProfile.mfaEnabled,
+            device: context.userAgent ?? "unknown",
+          },
+          requestId: randomBytes(16).toString("hex"),
+          ...(context.ipHash ? { ipHash: context.ipHash } : {}),
+        },
+      }),
+    ]);
+
+    return {
+      user: publicUser(user),
+      admin: {
+        role: user.adminProfile.role,
+        permissions: user.adminProfile.permissions,
+        mfaRequired: user.adminProfile.mfaRequired,
+        mfaEnabled: user.adminProfile.mfaEnabled,
+      },
       ...(await this.createSession(user, context)),
     };
   }

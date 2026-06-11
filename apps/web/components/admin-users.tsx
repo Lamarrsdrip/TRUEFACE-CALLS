@@ -12,11 +12,15 @@ interface UserRecord {
   email: string;
   status: string;
   createdAt: string;
+  roomCreationDisabled: boolean;
   creditWallet: { availableMilliCredits: number } | null;
 }
 
 export function AdminUsers() {
-  const users = useApiResource<UserRecord[]>("/admin/users");
+  const [search, setSearch] = useState("");
+  const users = useApiResource<UserRecord[]>(
+    `/admin/users${search ? `?search=${encodeURIComponent(search)}` : ""}`,
+  );
   const [message, setMessage] = useState<string | null>(null);
 
   async function setStatus(id: string, status: string) {
@@ -44,6 +48,15 @@ export function AdminUsers() {
     await users.refresh();
   }
 
+  async function toggleRoomAccess(user: UserRecord) {
+    await apiFetch(`/admin/users/${user.id}/room-access`, {
+      method: "PATCH",
+      ...jsonBody({ disabled: !user.roomCreationDisabled }),
+    });
+    setMessage("Room creation access updated and audited.");
+    await users.refresh();
+  }
+
   return (
     <>
       <PageHeader
@@ -51,6 +64,14 @@ export function AdminUsers() {
         description="Manage account access and apply audited manual credit adjustments."
       />
       {message ? <div className="notice notice-info">{message}</div> : null}
+      <div className="panel admin-search">
+        <input
+          type="search"
+          placeholder="Search by name or email"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </div>
       <form className="panel admin-inline-form" onSubmit={adjust}>
         <CircleDollarSign size={20} />
         <select name="userId" required defaultValue="">
@@ -106,6 +127,12 @@ export function AdminUsers() {
               }
             >
               {user.status === "ACTIVE" ? "Suspend" : "Activate"}
+            </button>
+            <button
+              className="button button-ghost button-sm"
+              onClick={() => void toggleRoomAccess(user)}
+            >
+              {user.roomCreationDisabled ? "Enable rooms" : "Disable rooms"}
             </button>
           </article>
         ))}

@@ -16,7 +16,13 @@ const plans = [
     description: "A consent-first 30 second AI face call trial.",
     monthlyCredits: 1_500,
     maxFaceProfiles: 1,
+    maxImagesPerProfile: 1,
     maxParticipants: 2,
+    maxCallMinutes: 1,
+    maxGroupCalls: 0,
+    watermarkRequired: true,
+    creditTopupsAllowed: false,
+    creditResetDays: 7,
     allowedQualities: [QualityMode.LOW, QualityMode.STANDARD],
     groupCalls: false,
     voiceEffects: false,
@@ -30,7 +36,13 @@ const plans = [
     description: "Standard quality for regular one-to-one calls.",
     monthlyCredits: 30_000,
     maxFaceProfiles: 3,
+    maxImagesPerProfile: 2,
     maxParticipants: 2,
+    maxCallMinutes: 60,
+    maxGroupCalls: 0,
+    watermarkRequired: true,
+    creditTopupsAllowed: true,
+    creditResetDays: 30,
     allowedQualities: [QualityMode.LOW, QualityMode.STANDARD],
     groupCalls: false,
     voiceEffects: true,
@@ -44,7 +56,13 @@ const plans = [
     description: "HD, group calls, and priority browser processing.",
     monthlyCredits: 120_000,
     maxFaceProfiles: 10,
+    maxImagesPerProfile: 5,
     maxParticipants: 12,
+    maxCallMinutes: 240,
+    maxGroupCalls: 100,
+    watermarkRequired: true,
+    creditTopupsAllowed: true,
+    creditResetDays: 30,
     allowedQualities: [QualityMode.LOW, QualityMode.STANDARD, QualityMode.HD],
     groupCalls: true,
     voiceEffects: true,
@@ -58,7 +76,13 @@ const plans = [
     description: "Teams, branding, analytics, and configurable limits.",
     monthlyCredits: 500_000,
     maxFaceProfiles: 50,
+    maxImagesPerProfile: 10,
     maxParticipants: 50,
+    maxCallMinutes: 720,
+    maxGroupCalls: 1000,
+    watermarkRequired: false,
+    creditTopupsAllowed: true,
+    creditResetDays: 30,
     allowedQualities: [QualityMode.LOW, QualityMode.STANDARD, QualityMode.HD],
     groupCalls: true,
     voiceEffects: true,
@@ -92,6 +116,76 @@ async function main() {
       },
     },
   });
+
+  const defaultSettings = [
+    {
+      namespace: "billing",
+      key: "credit-packs",
+      publicValue: {
+        packs: [
+          {
+            key: "starter",
+            name: "Starter credits",
+            creditsMilli: 25_000,
+            amountMinor: 500,
+            currency: "USD",
+          },
+          {
+            key: "creator",
+            name: "Creator credits",
+            creditsMilli: 120_000,
+            amountMinor: 2_000,
+            currency: "USD",
+          },
+        ],
+      },
+    },
+    {
+      namespace: "billing",
+      key: "usage-rates",
+      publicValue: {
+        baseCallMilliPerMinute: 250,
+        aiFaceMilliPerMinute: 1_000,
+        voiceEffectMultiplier: 1.25,
+        hdMultiplier: 1.5,
+        cloudGpuMultiplier: 2.5,
+      },
+    },
+    {
+      namespace: "features",
+      key: "flags",
+      publicValue: {
+        guestJoin: true,
+        screenShare: true,
+        voiceEffects: false,
+        cloudGpu: false,
+        manualBankTransfer: false,
+      },
+    },
+    {
+      namespace: "safety",
+      key: "policy",
+      publicValue: {
+        abuseReportingEnabled: true,
+        faceModerationRequired: true,
+        consentTermsVersion: "2026-06",
+        deleteRejectedFaceMedia: true,
+      },
+    },
+  ];
+
+  for (const setting of defaultSettings) {
+    await prisma.appSetting.upsert({
+      where: {
+        namespace_key: {
+          namespace: setting.namespace,
+          key: setting.key,
+        },
+      },
+      update: {},
+      create: setting,
+    });
+  }
 
   const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL;
   const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
@@ -162,6 +256,8 @@ async function ensureBootstrapUser(
     create: {
       userId: user.id,
       availableMilliCredits: trialCredits,
+      includedMilliCredits: trialCredits,
+      includedResetAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
   });
 

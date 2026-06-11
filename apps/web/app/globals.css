@@ -1418,7 +1418,7 @@ textarea:focus-visible {
   min-height: 82px;
   padding: 14px 18px;
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) 110px 90px 90px;
+  grid-template-columns: 46px minmax(0, 1fr) 110px 90px 90px minmax(210px, auto);
   align-items: center;
   gap: 14px;
   border: 1px solid var(--line);
@@ -1909,6 +1909,143 @@ textarea:focus-visible {
   background: #f5f7fb;
 }
 
+.admin-access-check,
+.admin-login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #dbeafe;
+  background:
+    radial-gradient(
+      circle at 20% 10%,
+      rgba(79, 70, 229, 0.35),
+      transparent 34%
+    ),
+    linear-gradient(145deg, #050b15, #0b1425 62%, #111b30);
+}
+
+.admin-login-card {
+  width: min(100%, 460px);
+  padding: 34px;
+  display: grid;
+  gap: 26px;
+  color: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.36);
+}
+
+.admin-login-card h1 {
+  margin-top: 8px;
+  font-size: clamp(28px, 7vw, 38px);
+  letter-spacing: -0.04em;
+}
+
+.admin-login-card p {
+  margin-top: 8px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.admin-console-label {
+  color: #4f46e5;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.admin-login-security,
+.admin-system-state {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.admin-system-state {
+  margin-top: auto;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+}
+
+.admin-logout {
+  min-height: 40px;
+  margin-top: 8px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.deployment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.deployment-grid h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+}
+
+.deployment-commands {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto 0.4fr 1.3fr 1fr;
+  align-items: center;
+  gap: 18px;
+}
+
+.deployment-commands > div {
+  display: grid;
+  gap: 5px;
+}
+
+.deployment-commands span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.deployment-commands code {
+  overflow-wrap: anywhere;
+}
+
+.readiness-list {
+  display: grid;
+  gap: 8px;
+}
+
+.readiness-list > div {
+  min-height: 44px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.12);
+}
+
 .admin-sidebar {
   height: 100vh;
   padding: 22px 14px;
@@ -1985,6 +2122,255 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 15px;
   background: white;
+}
+
+.admin-health-panel {
+  margin-top: 18px;
+  padding: 22px;
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: white;
+}
+
+.admin-health-panel h2 {
+  font-size: 17px;
+}
+
+.admin-health-panel p,
+.admin-health-panel small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-health-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-health-list > div {
+  min-height: 48px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #edf0f4;
+  border-radius: 10px;
+}
+
+.admin-health-list small {
+  grid-column: 2 / -1;
+}
+
+.admin-health-footer {
+  display: flex;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-search {
+  margin-bottom: 14px;
+}
+
+.admin-search input {
+  width: min(100%, 520px);
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.admin-call-record {
+  grid-template-columns: auto minmax(220px, 1fr) auto auto auto auto;
+}
+
+.admin-payment-record {
+  grid-template-columns: auto minmax(220px, 1fr) auto auto minmax(160px, auto);
+}
+
+.admin-export-row {
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.admin-economics {
+  margin-top: 22px;
+  display: grid;
+  gap: 18px;
+}
+
+.admin-economics-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.admin-economics-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+}
+
+.admin-economics-head p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cost-input-grid,
+.cost-output-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cost-output-grid > div {
+  padding: 14px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.cost-output-grid span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cost-pack-json {
+  min-height: 190px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.upload-preview > .face-upload-gallery {
+  width: 100%;
+  padding: 12px;
+  display: grid;
+  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.face-upload-gallery > div {
+  position: relative;
+  overflow: hidden;
+  min-height: 170px;
+  border-radius: 11px;
+  background: #0f172a;
+}
+
+.face-upload-gallery img {
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+}
+
+.face-upload-gallery select {
+  position: absolute;
+  left: 7px;
+  bottom: 7px;
+  max-width: calc(100% - 62px);
+  min-height: 32px;
+  padding: 0 7px;
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.88);
+}
+
+.face-upload-gallery > div > span {
+  position: absolute;
+  right: 7px;
+  bottom: 10px;
+  color: white;
+  font-size: 11px;
+}
+
+.face-readiness-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e5e7eb;
+}
+
+.face-readiness-track span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6366f1, #22c55e);
+}
+
+.room-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.bank-checkout-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(340px, 1.2fr);
+  gap: 18px;
+}
+
+.bank-details {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  background: linear-gradient(150deg, #111827, #1e293b);
+  color: white;
+}
+
+.bank-details > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+}
+
+.bank-details span,
+.bank-details p {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.bank-details strong {
+  grid-column: 1;
+  font-size: 17px;
+}
+
+.bank-details .icon-button {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  color: white;
+}
+
+.file-drop {
+  min-height: 96px;
+  padding: 18px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  color: var(--muted);
+  border: 1px dashed #a5b4fc;
+  border-radius: 10px;
+  background: #f8f8ff;
+  cursor: pointer;
+}
+
+.bank-checkout-success {
+  max-width: 620px;
+  margin: 10vh auto 0;
+  display: grid;
+  justify-items: start;
+  gap: 16px;
 }
 
 .admin-table {
@@ -2518,8 +2904,22 @@ textarea:focus-visible {
   .admin-plan-grid,
   .admin-inline-form,
   .admin-setting-form,
-  .form-two {
+  .form-two,
+  .bank-checkout-layout,
+  .cost-input-grid,
+  .cost-output-grid,
+  .deployment-grid,
+  .deployment-commands {
     grid-template-columns: 1fr;
+  }
+
+  .deployment-commands {
+    grid-column: auto;
+  }
+
+  .admin-economics-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .provider-list {
@@ -2528,7 +2928,9 @@ textarea:focus-visible {
 
   .admin-record,
   .admin-record-tall,
-  .admin-report {
+  .admin-report,
+  .admin-call-record,
+  .admin-payment-record {
     grid-template-columns: auto minmax(0, 1fr);
   }
 

@@ -34,6 +34,12 @@ export class BillingController {
     return this.billing.payments(request.user.sub);
   }
 
+  @Get("billing/credit-packs")
+  @UseGuards(AuthGuard)
+  creditPacks(@Req() request: AuthenticatedRequest) {
+    return this.billing.creditPacks(request.user.sub);
+  }
+
   @Post("billing/checkout/subscription")
   @UseGuards(AuthGuard)
   subscriptionCheckout(
@@ -54,12 +60,41 @@ export class BillingController {
     @Body()
     body: {
       provider: "stripe" | "paystack" | "flutterwave";
-      creditsMilli: number;
-      amountMinor: number;
-      currency: string;
+      packKey: string;
     },
   ) {
     return this.billing.createCreditCheckout(request.user.sub, body);
+  }
+
+  @Post("billing/checkout/manual")
+  @UseGuards(AuthGuard)
+  manualCheckout(
+    @Req() request: AuthenticatedRequest,
+    @Body()
+    body: {
+      type: "subscription" | "credits";
+      planId?: string;
+      creditPackKey?: string;
+      transferReference: string;
+      proofObjectKey?: string;
+    },
+  ) {
+    return this.billing.createManualCheckout(request.user.sub, body);
+  }
+
+  @Get("billing/manual-bank")
+  @UseGuards(AuthGuard)
+  manualBank() {
+    return this.billing.manualBank();
+  }
+
+  @Post("billing/manual-proof-upload")
+  @UseGuards(AuthGuard)
+  manualProofUpload(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { contentType: string; sizeBytes: number },
+  ) {
+    return this.billing.createManualProofUpload(request.user.sub, body);
   }
 
   @Post("webhooks/stripe")

@@ -112,4 +112,9 @@ export class CallsController {
   history(@Req() request: AuthenticatedRequest) {
     return this.rooms.history(request.user.sub);
   }
+
+  @Get("rooms")
+  listRooms(@Req() request: AuthenticatedRequest) {
+    return this.rooms.userRooms(request.user.sub);
+  }
 }

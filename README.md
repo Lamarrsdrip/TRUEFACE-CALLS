@@ -86,7 +86,7 @@ AES-256-GCM and are returned only as fingerprints.
 ## Provider Setup
 
 1. Sign in with the bootstrap admin.
-2. Open `/admin/providers`.
+2. Open `/admin/login`, then `/admin/providers`.
 3. Configure and test LiveKit, S3 storage, email, and payment providers.
 4. Configure GPU providers only when cloud processing workers are available.
 5. Open `/admin/plans` to edit prices, credits, and entitlement limits.
@@ -121,6 +121,9 @@ npm run start:deploy
 
 See [docs/deployment/emergent.md](docs/deployment/emergent.md) for the complete
 deployment and provider checklist.
+
+The reviewer handoff begins at
+[docs/audit/README_AUDIT.md](docs/audit/README_AUDIT.md).
 
 ## Production Boundaries
 

@@ -468,9 +468,14 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
     setAiBusy(true);
     setError(null);
     try {
-      const rate =
-        quality === "hd" ? 4_000 : quality === "standard" ? 2_500 : 2_000;
-      const reservation = rate * 5;
+      const quote = await apiFetch<{
+        milliCreditsPerMinute: number;
+        fiveMinuteReservationMilli: number;
+      }>(
+        `/credits/quote?roomId=${encodeURIComponent(roomInfo.id)}&mode=AI_FACE&quality=${quality.toUpperCase()}`,
+      );
+      const rate = quote.milliCreditsPerMinute;
+      const reservation = quote.fiveMinuteReservationMilli;
       await apiFetch("/credits/meter/reserve", {
         method: "POST",
         ...jsonBody({

@@ -33,6 +33,15 @@ export function AdminModeration() {
     await faces.refresh();
   }
 
+  async function remove(id: string) {
+    await apiFetch(`/admin/faces/${id}/delete`, {
+      method: "POST",
+      ...jsonBody({ reason: "Administrative moderation deletion" }),
+    });
+    setMessage("Face media deleted, consent revoked, and audit log created.");
+    await faces.refresh();
+  }
+
   return (
     <>
       <PageHeader
@@ -76,6 +85,12 @@ export function AdminModeration() {
                 onClick={() => void decide(face.id, "REJECTED")}
               >
                 Reject
+              </button>
+              <button
+                className="button button-danger button-sm"
+                onClick={() => void remove(face.id)}
+              >
+                Delete media
               </button>
             </div>
           </article>

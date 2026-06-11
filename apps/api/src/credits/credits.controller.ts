@@ -42,6 +42,16 @@ export class CreditsController {
     return this.credits.reserve({ userId: request.user.sub, ...body });
   }
 
+  @Get("quote")
+  quote(
+    @Req() request: AuthenticatedRequest,
+    @Query("roomId") roomId: string,
+    @Query("mode") mode: "BASE_CALL" | "AI_FACE" | "VOICE_EFFECT" | "CLOUD_GPU",
+    @Query("quality") quality: "LOW" | "STANDARD" | "HD",
+  ) {
+    return this.credits.quote(request.user.sub, { roomId, mode, quality });
+  }
+
   @Post("meter/settle")
   settle(
     @Req() request: AuthenticatedRequest,
