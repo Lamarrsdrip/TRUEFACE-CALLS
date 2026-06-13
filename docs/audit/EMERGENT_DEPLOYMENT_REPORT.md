@@ -1,64 +1,35 @@
 # Emergent Deployment Report
 
-## Deployment Recommendation
+## Status
 
-Deploy the current product on Emergent only if the preview accepts the custom
-Node/Docker runtime and external service URLs. This preserves the working SaaS
-foundation and avoids a risky database/backend rewrite.
+The application has been migrated to Emergent's supported architecture.
 
-## Required Build And Start
+- Frontend: `frontend/`
+- Backend: `backend/server.py`
+- Backend port: `8001`
+- API prefix: `/api`
+- Database: MongoDB
+- Storage: private GridFS
 
-Build:
+## Import
 
-```bash
-npm ci && npm run db:generate && npm run build
-```
+Pull `Lamarrsdrip/TRUEFACE-CALLS`, branch `codex/emergent-native`.
 
-Start:
+## Required Environment
 
-```bash
-npm run start:deploy
-```
-
-## Required Environment Variables
-
-- `NODE_ENV=production`
+- `MONGO_URL`
+- `DB_NAME`
 - `APP_URL`
-- `API_URL`
-- `API_INTERNAL_URL`
-- `API_PORT=4000`
-- `DATABASE_URL`
-- `DIRECT_DATABASE_URL`
-- `REDIS_URL`
 - `AUTH_SECRET`
 - `SETTINGS_MASTER_KEY`
 - `BOOTSTRAP_ADMIN_EMAIL`
 - `BOOTSTRAP_ADMIN_PASSWORD`
 
-## Provider Setup After Deploy
+All other provider credentials can be saved later in the encrypted admin
+dashboard.
 
-Configure these from Admin when possible:
+## Remaining Acceptance
 
-- LiveKit URL, API key, and API secret.
-- Storage endpoint, bucket, region, access key, and secret.
-- Email provider and sender identity.
-- Stripe, Paystack, Flutterwave, or manual bank-transfer details.
-- Optional GPU provider settings.
-- Plan limits, credit packs, cost assumptions, branding, and safety settings.
-
-## Compatibility Status
-
-- Next.js app: compatible with Emergent if Node/Next build is supported.
-- NestJS API: compatible only with custom runtime or separate API hosting.
-- PostgreSQL/Prisma: requires external managed PostgreSQL.
-- Redis: requires managed Redis.
-- S3: requires managed S3-compatible private object storage.
-- MongoDB-only runtime: requires the migration plan.
-
-## Production Readiness Score
-
-Post-hardening score: 82/100.
-
-The score is held down by missing real-provider LiveKit/payment acceptance
-tests, no admin MFA enforcement, production infrastructure still needing
-provisioning, and unconfirmed Emergent custom-runtime support.
+Emergent must supply a production URL and MongoDB connection. Real LiveKit,
+payment, email and GPU acceptance testing requires credentials from those
+external providers.

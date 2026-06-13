@@ -402,7 +402,13 @@ def call_history(request: Request, user: dict = Depends(current_user)) -> list[d
 
 
 def _assert_password(room: dict, provided) -> None:
-    if room.get("passwordHash") and (
-        not provided or not PASSWORDS.verify(room["passwordHash"], str(provided))
-    ):
+    if not room.get("passwordHash"):
+        return
+    try:
+        valid = bool(provided) and PASSWORDS.verify(
+            room["passwordHash"], str(provided)
+        )
+    except Exception:
+        valid = False
+    if not valid:
         raise HTTPException(status_code=403, detail="Room password is incorrect")

@@ -26,7 +26,11 @@ const definitions: Record<
     { key: "apiSecret", label: "API secret", secret: true },
   ],
   storage: [
-    { key: "provider", label: "Storage provider", placeholder: "emergent-s3" },
+    {
+      key: "provider",
+      label: "Storage provider",
+      placeholder: "gridfs | s3 | r2",
+    },
     { key: "endpoint", label: "S3 endpoint" },
     { key: "region", label: "Region" },
     { key: "bucket", label: "Bucket" },
@@ -67,14 +71,40 @@ const definitions: Record<
     { key: "username", label: "SMTP username" },
     { key: "password", label: "SMTP password", secret: true },
   ],
+  ai: [
+    { key: "enabled", label: "AI processing enabled", placeholder: "true" },
+    {
+      key: "mode",
+      label: "Default processing mode",
+      placeholder: "browser | cloud | hybrid",
+    },
+    {
+      key: "provider",
+      label: "AI provider",
+      placeholder: "browser | replicate | custom",
+    },
+    { key: "endpoint", label: "AI endpoint" },
+    { key: "apiKey", label: "AI API key", secret: true },
+    { key: "model", label: "Model name" },
+    { key: "version", label: "Model version" },
+    { key: "browserModelUrl", label: "Browser model URL" },
+  ],
   gpu: [
     {
       key: "provider",
       label: "GPU provider",
-      placeholder: "local | runpod | modal | aws",
+      placeholder: "runpod | modal | aws | replicate | custom",
     },
     { key: "endpoint", label: "Worker endpoint" },
     { key: "apiKey", label: "API key", secret: true },
+    { key: "region", label: "Region" },
+    { key: "model", label: "Model or worker name" },
+    { key: "timeoutSeconds", label: "Timeout seconds", placeholder: "30" },
+    {
+      key: "fallbackMode",
+      label: "Failure fallback",
+      placeholder: "browser | pause-ai",
+    },
   ],
   "manual-bank": [
     { key: "enabled", label: "Enabled", placeholder: "false" },

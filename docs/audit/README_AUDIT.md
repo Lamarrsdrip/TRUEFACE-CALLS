@@ -1,51 +1,44 @@
-# TrueFace Calls Audit Package
+# TrueFace Calls Audit Handoff
 
-This directory is the reviewer handoff for the `codex/trueface-foundation`
-branch. Start with `ARCHITECTURE.md`, then review the domain-specific files.
+This audit describes `codex/emergent-native`.
 
-## Verification Commands
+## Runtime
+
+- `frontend/`: standalone Next.js mobile-first customer and admin UI.
+- `backend/`: FastAPI on port 8001.
+- MongoDB collections and private GridFS file storage.
+- Same-origin `/api` ingress.
+
+## Implemented
+
+- Cookie authentication, CSRF, Argon2 passwords and refresh sessions.
+- Subscription-first credit top-ups and milli-credit usage ledger.
+- Trial, Basic, Pro and Business plan controls.
+- Manual bank transfers with administrator-only approval.
+- Stripe, Paystack and Flutterwave checkout adapters and webhook verification.
+- Persistent call rooms, signed invites, waiting room and host controls.
+- LiveKit token adapter with explicit unconfigured state.
+- Multi-image face profiles, quality/readiness and immutable consent logs.
+- Private signed face downloads, moderation, deletion and abuse reporting.
+- Encrypted admin provider settings and connection health.
+- Admin users, credits, plans, payments, calls, moderation, settings,
+  broadcasts and audit export.
+
+## Verification
+
+Run:
 
 ```bash
+python3 -m pytest backend/tests -q
+cd frontend
 npm ci
-npm run db:generate
-npm run db:migrate:deploy
-npm run db:seed
-npm run test
+npm test
 npm run typecheck
 npm run build
 ```
 
-Emergent uses:
+Deployment instructions are in `EMERGENT_DEPLOY.md`.
 
-```bash
-npm ci && npm run db:generate && npm run build
-npm run start:deploy
-```
-
-## Review Priorities
-
-1. Subscription and wallet invariants in `apps/api/src/billing` and
-   `apps/api/src/credits`.
-2. Face consent, private object lifecycle, and moderation in
-   `apps/api/src/faces`.
-3. Signed invite and LiveKit publication behavior in `apps/api/src/rooms` and
-   `apps/web/components/call-room-client.tsx`.
-4. Provider credential encryption in `apps/api/src/providers`.
-5. Admin permission checks and audit records in `apps/api/src/admin`.
-
-No production provider secret is committed. `.env.example` contains names and
-safe placeholders only.
-
-## Launch-Readiness Addendum
-
-- `EMERGENT_COMPATIBILITY_AUDIT.md`
-- `EMERGENT_MIGRATION_PLAN.md`
-- `FEATURE_PARITY_CHECKLIST.md`
-- `CURRENT_STACK_DEPENDENCIES.md`
-- `HOST_GUEST_CALL_BUG_ANALYSIS.md`
-- `DEPLOYMENT_OPTIONS.md`
-- `LAUNCH_BLOCKERS.md`
-- `EMERGENT_DEPLOYMENT_REPORT.md`
-- `FACE_AI_STATUS.md`
-- `GPU_FACE_REPLACEMENT_ARCHITECTURE.md`
-- `LAUNCH_HARDENING_CHECKLIST.md`
+External services remain unavailable until their keys are entered through
+`/admin/providers`. The application reports `UNCONFIGURED`; it does not fake
+provider success.

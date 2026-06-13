@@ -1,6 +1,6 @@
 {
-  "name": "@trueface/web",
-  "version": "0.1.0",
+  "name": "trueface-calls-frontend",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23,11 +23,15 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
+    "@types/node": "^22.19.21",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "postcss": "^8.5.10",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.8"
+  },
+  "overrides": {
+    "postcss": "$postcss"
   }
 }

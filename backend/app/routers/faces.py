@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["faces"])
 def _quality(body: dict) -> dict:
     width, height = int(body.get("width", 0)), int(body.get("height", 0))
     face_count = int(body.get("faceCount", body.get("faces", 0)))
-    sharpness = float(body.get("sharpness", 0))
+    sharpness = float(body.get("sharpness", body.get("blurScore", 0)))
     brightness = float(body.get("brightness", 0))
     coverage = float(body.get("faceCoverage", 0))
     checks = {

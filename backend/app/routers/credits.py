@@ -175,6 +175,21 @@ def settle(
         "createdAt": now,
     }
     db.usage_minutes.insert_one(usage)
+    db.credit_transactions.insert_one(
+        {
+            "id": str(uuid.uuid4()),
+            "walletId": wallet["id"],
+            "userId": user["id"],
+            "roomId": body.get("roomId"),
+            "type": "USAGE",
+            "amountMilli": -charge,
+            "balanceAfterMilli": wallet["availableMilliCredits"],
+            "source": "call-meter",
+            "reason": f"{usage['mode']} {usage['quality']}",
+            "idempotencyKey": f"usage:{window}",
+            "createdAt": now,
+        }
+    )
     return json_safe({k: v for k, v in usage.items() if k != "_id"})
 
 

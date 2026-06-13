@@ -1,23 +1,14 @@
 # Known Limitations
 
-- The browser media engine is a consented real-time compositing foundation,
-  not a claimed production-grade photorealistic identity model.
-- Multiple face images are validated and stored, but the current browser
-  processor uses the front image. Multi-view GPU training/inference is a
-  future adapter.
-- Email delivery currently executes through Resend. Other email providers are
-  securely configurable but require outbound adapters.
-- GPU, WhatsApp, and monitoring providers have secure settings and health
-  structure but require service-specific runtime adapters.
-- Stripe recurring invoice lifecycle handling should be expanded for full
-  renewal, proration, dispute, and dunning coverage before broad launch.
-- Paystack and Flutterwave recurring subscriptions depend on the chosen
-  commercial product configuration and need provider-account acceptance tests.
-- Admin MFA fields and policy are ready, but TOTP/WebAuthn enrollment and
-  challenge screens are not yet implemented.
-- Emergent must supply or connect managed PostgreSQL because the app uses
-  Prisma/PostgreSQL rather than MongoDB.
-- `npm audit` currently reports two moderate advisories against the exact
-  PostCSS version nested inside Next.js 16.2.9. The available forced npm fix
-  proposes a breaking downgrade to Next.js 9, so it was not applied. Track the
-  upstream Next.js dependency update and rerun the audit before launch.
+- Real calls require LiveKit credentials and provider acceptance testing.
+- Gateway checkout requires real provider keys and registered webhook URLs.
+- Transactional email requires a configured provider.
+- Browser AI is a consented local compositor, not yet a photorealistic GPU
+  replacement model.
+- Cloud GPU execution requires a future external worker.
+- Admin MFA is represented in the data model but TOTP enrollment/enforcement
+  is not yet complete.
+- MongoDB replica-set transactions should be enabled for the strongest
+  multi-document billing guarantees. Idempotency keys permit safe recovery.
+- GridFS is private and Emergent-native; very large deployments may later move
+  files to S3 or R2 through the existing admin provider boundary.

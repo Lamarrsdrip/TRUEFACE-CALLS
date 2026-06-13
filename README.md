@@ -1,137 +1,91 @@
 # TrueFace Calls
 
-Consent-first, mobile-first AI face controls for secure browser video calls.
+Consent-first, mobile-first AI face controls for browser video calls.
 
-TrueFace Calls is a production SaaS foundation built with Next.js, NestJS,
-PostgreSQL, Prisma, LiveKit, MediaPipe, S3-compatible storage, Stripe,
-Paystack, and Flutterwave.
-
-## Product Safety
-
-- Every face profile requires ownership, permission, and terms acceptance.
-- Consent is recorded as a versioned, revocable audit record.
-- AI face mode is disclosed in the room UI and participant metadata.
-- Raw camera publication stops before the processed track is published.
-- Tracking failures pause AI output instead of hiding uncertainty.
-- Face deletion removes storage objects and revokes consent.
-- Abuse reporting, user blocking, moderation queues, and admin audit logs are
-  built in.
-
-## Repository
+This branch is the **Emergent-native** edition:
 
 ```text
-apps/web                 Next.js customer and admin applications
-apps/api                 NestJS API and provider orchestration
-packages/contracts       Shared validation, plan, billing, and device policy
-packages/database        Prisma schema, migrations, and idempotent seed
-packages/media-engine    Browser processing and publication state machine
-packages/providers       Credential vault and provider abstractions
-docs                     Architecture, implementation, and deployment guides
+frontend/   Next.js, React, TypeScript, LiveKit client, MediaPipe and WebGL
+backend/    FastAPI on port 8001, MongoDB and private GridFS storage
+docs/       Architecture, security, audit and provider documentation
 ```
 
-## Local Setup
+The original NestJS/PostgreSQL edition remains preserved on
+`codex/trueface-foundation`.
 
-Requirements: Node.js 22+, npm 10+, PostgreSQL 16+, Redis 7+, and
-S3-compatible object storage.
+## Emergent Import
 
-```bash
-cp .env.example .env
-npm ci
-npm run db:generate
-npm run db:migrate:deploy
-npm run db:seed
-npm run dev
+Import:
+
+```text
+https://github.com/Lamarrsdrip/TRUEFACE-CALLS
 ```
 
-Open `http://localhost:3000`. The API is available through the same-origin
-`/api` rewrite and directly on `http://localhost:4000/v1`.
+Select branch:
 
-## Commands
-
-```bash
-npm run test
-npm run typecheck
-npm run build
-npm run start
-npm run start:deploy
-npm run db:migrate:deploy
-npm run db:seed
+```text
+codex/emergent-native
 ```
 
-`start:deploy` applies committed migrations, runs the idempotent seed, and
-starts the web and API processes.
+Emergent should detect `frontend/` and `backend/`. The backend entrypoint is
+`backend/server.py`, exports `app`, and listens through Emergent's required
+FastAPI port `8001`. Every backend route starts with `/api`.
+
+See [EMERGENT_DEPLOY.md](EMERGENT_DEPLOY.md) for the exact deployment prompt.
 
 ## Required Environment
 
-- `NODE_ENV`
-- `APP_URL`
-- `API_URL`
-- `DATABASE_URL`
-- `DIRECT_DATABASE_URL`
-- `REDIS_URL`
-- `AUTH_SECRET` (32+ random characters)
-- `SETTINGS_MASTER_KEY` (base64 encoded 32-byte key)
-- `BOOTSTRAP_ADMIN_EMAIL`
-- `BOOTSTRAP_ADMIN_PASSWORD`
-
-Optional preview account:
-
-- `BOOTSTRAP_PREVIEW_EMAIL`
-- `BOOTSTRAP_PREVIEW_PASSWORD`
-
-Provider credentials can be supplied as environment fallbacks or saved after
-deployment in **Admin > Providers**. Admin-saved secrets are encrypted with
-AES-256-GCM and are returned only as fingerprints.
-
-## Provider Setup
-
-1. Sign in with the bootstrap admin.
-2. Open `/admin/login`, then `/admin/providers`.
-3. Configure and test LiveKit, S3 storage, email, and payment providers.
-4. Configure GPU providers only when cloud processing workers are available.
-5. Open `/admin/plans` to edit prices, credits, and entitlement limits.
-6. Open `/admin/settings` for branding, moderation, and product policy JSON.
-
-LiveKit Cloud is the recommended launch provider. The storage adapter supports
-Emergent-compatible S3 storage now and S3, R2, MinIO, or another compatible
-provider later.
-
-## Emergent Deployment
-
-The repository includes a production Dockerfile and provider-agnostic runtime
-contract. Emergent handles application build, container hosting, HTTPS,
-preview/production URLs, deployment, and environment secret injection.
-
-Emergent currently documents MongoDB as its native database. This application
-requires PostgreSQL, so provide a managed PostgreSQL `DATABASE_URL` and
-`DIRECT_DATABASE_URL`. Use managed Redis and S3-compatible storage in the same
-way.
-
-Build command:
-
-```bash
-npm ci && npm run db:generate && npm run build
+```text
+MONGO_URL
+DB_NAME
+APP_URL
+AUTH_SECRET
+SETTINGS_MASTER_KEY
+BOOTSTRAP_ADMIN_EMAIL
+BOOTSTRAP_ADMIN_PASSWORD
 ```
 
-Start command:
+Generate `SETTINGS_MASTER_KEY` as base64 for exactly 32 random bytes. Provider
+keys are intentionally absent from the required environment.
+
+## Admin Provider Setup
+
+After deployment:
+
+1. Open `/admin/login`.
+2. Sign in with the bootstrap administrator.
+3. Open `/admin/providers`.
+4. Enter and test LiveKit, payments, email, storage, AI and GPU credentials.
+5. Configure manual bank details if accepting reviewed transfers.
+6. Open `/admin/plans` to configure subscription prices, credits and limits.
+7. Open `/admin/settings` for branding, safety and product-policy JSON.
+8. Open `/admin/system-health` to verify the deployment.
+
+Provider credentials are encrypted with AES-256-GCM before MongoDB storage.
+The browser receives only fingerprints, never saved secret values.
+
+## Local Verification
+
+Backend:
 
 ```bash
-npm run start:deploy
+python3 -m pip install -r backend/requirements.txt
+python3 -m pytest backend/tests -q
+cd backend
+uvicorn server:app --host 0.0.0.0 --port 8001
 ```
 
-See [docs/deployment/emergent.md](docs/deployment/emergent.md) for the complete
-deployment and provider checklist.
+Frontend:
 
-The reviewer handoff begins at
-[docs/audit/README_AUDIT.md](docs/audit/README_AUDIT.md).
+```bash
+cd frontend
+npm ci
+npm test
+npm run typecheck
+npm run build
+npm start
+```
 
-## Production Boundaries
-
-Browser processing currently uses a compositing adapter suitable for approved
-avatars and consented face effects. The `FaceProcessor` contract is designed
-for a future photorealistic model or GPU worker without changing room,
-billing, safety, or publication logic.
-
-Real calls require LiveKit credentials. Payments require at least one supported
-payment provider. Transactional email currently supports Resend through the
-admin-configured email provider.
+The frontend uses same-origin `/api` calls. Real LiveKit calls, gateway
+payments, transactional email and cloud GPU inference remain disabled until
+their credentials are entered in the admin dashboard.

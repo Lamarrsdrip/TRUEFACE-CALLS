@@ -279,6 +279,8 @@ def decide_payment(
     if not payment:
         raise HTTPException(status_code=404, detail="Manual payment not found")
     if payment["status"] != "PENDING":
+        if payment["status"] == "SUCCEEDED":
+            _fulfill_payment(db, payment, admin["id"])
         return {"id": payment_id, "status": payment["status"], "idempotent": True}
     decision = str(body.get("decision", ""))
     if decision not in {"APPROVE", "REJECT"}:

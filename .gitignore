@@ -2,6 +2,10 @@ node_modules/
 .next/
 dist/
 coverage/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
 playwright-report/
 test-results/
 .turbo/

@@ -23,6 +23,7 @@ PROVIDER_FIELDS = {
         "required": {"secretKey"},
     },
     "email": {"secret": {"apiKey", "password"}, "required": set()},
+    "ai": {"secret": {"apiKey"}, "required": set()},
     "gpu": {"secret": {"apiKey", "secretKey"}, "required": set()},
     "manual-bank": {"secret": set(), "required": set()},
     "monitoring": {"secret": {"dsn"}, "required": set()},
