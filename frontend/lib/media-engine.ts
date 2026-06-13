@@ -1,4 +1,4 @@
-import type { QualityProfile } from "@trueface/contracts";
+import type { QualityProfile } from "./contracts";
 
 export type TrackingState = "tracking" | "degraded" | "paused";
 

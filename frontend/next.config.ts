@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const apiInternalUrl = process.env.API_INTERNAL_URL ?? "http://127.0.0.1:4000";
+const apiInternalUrl = "http://127.0.0.1:8001";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: `${apiInternalUrl}/v1/:path*`,
+        destination: `${apiInternalUrl}/api/:path*`,
       },
     ];
   },

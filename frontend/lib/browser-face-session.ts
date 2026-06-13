@@ -5,7 +5,7 @@ import {
   FilesetResolver,
   type NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
-import { TrackingStateMachine } from "@trueface/media-engine";
+import { TrackingStateMachine } from "./media-engine";
 
 export interface BrowserFaceSessionOptions {
   sourceTrack: MediaStreamTrack;
