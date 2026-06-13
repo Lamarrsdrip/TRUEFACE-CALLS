@@ -29,6 +29,7 @@ const adminNav = [
   ["/admin/moderation", Sparkles, "Face moderation"],
   ["/admin/reports", ShieldAlert, "Abuse reports"],
   ["/admin/providers", Activity, "Providers"],
+  ["/admin/system-health", ServerCog, "System health"],
   ["/admin/plans", Blocks, "Plans & limits"],
   ["/admin/settings", Settings, "App settings"],
   ["/admin/deployment", ServerCog, "Deployment"],

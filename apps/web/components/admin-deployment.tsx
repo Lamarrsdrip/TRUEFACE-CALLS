@@ -24,8 +24,8 @@ export function AdminDeployment() {
   return (
     <>
       <PageHeader
-        title="Deployment readiness"
-        description="Secret-safe runtime status for Emergent imports, database bootstrapping, and provider activation."
+        title="System health and deployment readiness"
+        description="Secret-safe runtime status for Emergent imports, database bootstrapping, LiveKit, storage, payments, email, and provider activation."
       />
       {status.loading ? <LoadingState /> : null}
       {status.error ? <ErrorState message={status.error} /> : null}

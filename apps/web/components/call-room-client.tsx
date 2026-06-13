@@ -35,6 +35,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, jsonBody } from "../lib/api";
 import { BrowserFaceSession } from "../lib/browser-face-session";
+import {
+  getJoinButtonLabel,
+  isJoinButtonDisabled,
+  shouldShowGuestNameField,
+  shouldShowHostControls,
+} from "../lib/call-room-policy";
 import { creditsFromMilli } from "../lib/format";
 
 interface RoomInfo {
@@ -44,6 +50,8 @@ interface RoomInfo {
   allowGuests: boolean;
   passwordRequired: boolean;
   participantCount: number;
+  inviteUrl: string;
+  hostUrl: string;
 }
 
 interface JoinCredentials {
@@ -57,12 +65,21 @@ interface FaceProfile {
   moderationStatus: string;
 }
 
+interface WaitingParticipant {
+  id: string;
+  guestName: string | null;
+  createdAt: string;
+  user: { displayName: string | null; avatarUrl: string | null } | null;
+}
+
 export function CallRoomClient({ slug }: { slug: string }) {
   const search = useSearchParams();
   const router = useRouter();
   const invite = search.get("invite") ?? "";
+  const hostIntent = search.get("host") === "1";
   const previewRef = useRef<HTMLVideoElement>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
+  const attemptedHostJoin = useRef(false);
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [credentials, setCredentials] = useState<JoinCredentials | null>(null);
   const [name, setName] = useState("");
@@ -127,7 +144,14 @@ export function CallRoomClient({ slug }: { slug: string }) {
             }),
           );
           return;
-        } catch {
+        } catch (tokenError) {
+          if (hostIntent) {
+            throw new Error(
+              tokenError instanceof Error
+                ? `Host access failed: ${tokenError.message}`
+                : "Host access requires the signed-in room creator",
+            );
+          }
           const participant = await apiFetch<{ state: string }>(
             `/rooms/${room.id}/join-user`,
             {
@@ -144,6 +168,10 @@ export function CallRoomClient({ slug }: { slug: string }) {
           await pollAuthenticatedToken(room.id);
           return;
         }
+      }
+
+      if (hostIntent) {
+        throw new Error("Sign in as the room creator to enter as host.");
       }
 
       const guest = await apiFetch<{
@@ -166,6 +194,14 @@ export function CallRoomClient({ slug }: { slug: string }) {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!room || !hostIntent || credentials || waiting) return;
+    if (attemptedHostJoin.current) return;
+    attemptedHostJoin.current = true;
+    void join();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, hostIntent, credentials, waiting]);
 
   async function pollAuthenticatedToken(roomId: string) {
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -295,15 +331,20 @@ export function CallRoomClient({ slug }: { slug: string }) {
         </div>
         {!waiting ? (
           <div className="form-grid">
-            <div className="field">
-              <label htmlFor="guestName">Your name</label>
-              <input
-                id="guestName"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Visible to the host"
-              />
-            </div>
+            {shouldShowGuestNameField({
+              allowGuests: Boolean(room?.allowGuests),
+              isHostIntent: hostIntent,
+            }) ? (
+              <div className="field">
+                <label htmlFor="guestName">Your name</label>
+                <input
+                  id="guestName"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Visible to the host"
+                />
+              </div>
+            ) : null}
             {room?.passwordRequired ? (
               <div className="field">
                 <label htmlFor="roomPassword">Room password</label>
@@ -330,10 +371,15 @@ export function CallRoomClient({ slug }: { slug: string }) {
             <button
               className="button button-primary"
               onClick={join}
-              disabled={busy || (!name.trim() && room?.allowGuests)}
+              disabled={isJoinButtonDisabled({
+                busy,
+                allowGuests: Boolean(room?.allowGuests),
+                isHostIntent: hostIntent,
+                guestName: name,
+              })}
             >
               {busy ? <LoaderCircle className="spin" size={17} /> : null}
-              Ask to join
+              {getJoinButtonLabel({ isHostIntent: hostIntent, busy })}
             </button>
           </div>
         ) : (
@@ -378,6 +424,10 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   );
   const [network, setNetwork] = useState("good");
   const [error, setError] = useState<string | null>(null);
+  const [waitingParticipants, setWaitingParticipants] = useState<
+    WaitingParticipant[]
+  >([]);
+  const [hostMessage, setHostMessage] = useState<string | null>(null);
   const aiSession = useRef<BrowserFaceSession | null>(null);
   const rawTrack = useRef<LocalVideoTrack | null>(null);
   const processedTrack = useRef<LocalVideoTrack | null>(null);
@@ -416,6 +466,25 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       room.off(RoomEvent.ConnectionQualityChanged, listener);
     };
   }, [room]);
+
+  const metadata = parseParticipantMetadata(room.localParticipant.metadata);
+  const isHost = shouldShowHostControls({
+    localRole: typeof metadata.role === "string" ? metadata.role : null,
+  });
+
+  const refreshWaiting = useCallback(async () => {
+    if (!isHost) return;
+    setWaitingParticipants(
+      await apiFetch<WaitingParticipant[]>(`/rooms/${roomInfo.id}/waiting`),
+    );
+  }, [isHost, roomInfo.id]);
+
+  useEffect(() => {
+    if (!isHost) return;
+    void refreshWaiting();
+    const interval = setInterval(() => void refreshWaiting(), 4_000);
+    return () => clearInterval(interval);
+  }, [isHost, refreshWaiting]);
 
   const disableAi = useCallback(async () => {
     if (!aiActive && !processedTrack.current) return;
@@ -597,6 +666,24 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
     }
   }
 
+  async function decideWaiting(participantId: string, approve: boolean) {
+    setHostMessage(null);
+    await apiFetch(
+      `/rooms/${roomInfo.id}/${approve ? "approve" : "reject"}/${participantId}`,
+      {
+        method: "POST",
+        ...jsonBody({}),
+      },
+    );
+    setHostMessage(approve ? "Participant admitted." : "Request rejected.");
+    await refreshWaiting();
+  }
+
+  async function copyInvite() {
+    await navigator.clipboard.writeText(roomInfo.inviteUrl);
+    setHostMessage("Invite link copied.");
+  }
+
   async function submitChat(event: React.FormEvent) {
     event.preventDefault();
     if (!chatText.trim()) return;
@@ -626,6 +713,49 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
           </span>
         </div>
       </header>
+      {isHost ? (
+        <section className="call-host-panel">
+          <div>
+            <strong>Host controls</strong>
+            <span>
+              {waitingParticipants.length} waiting · {room.numParticipants} in
+              room
+            </span>
+          </div>
+          <button
+            className="button button-secondary button-sm"
+            onClick={copyInvite}
+          >
+            <Copy size={14} /> Copy invite
+          </button>
+          {waitingParticipants.length ? (
+            <div className="waiting-list">
+              {waitingParticipants.map((participant) => (
+                <div key={participant.id}>
+                  <span>
+                    {participant.user?.displayName ??
+                      participant.guestName ??
+                      "Guest"}
+                  </span>
+                  <button
+                    className="button button-primary button-sm"
+                    onClick={() => void decideWaiting(participant.id, true)}
+                  >
+                    Admit
+                  </button>
+                  <button
+                    className="button button-danger button-sm"
+                    onClick={() => void decideWaiting(participant.id, false)}
+                  >
+                    Reject
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {hostMessage ? <small>{hostMessage}</small> : null}
+        </section>
+      ) : null}
       <div className={chatOpen ? "call-stage chat-visible" : "call-stage"}>
         <div className="participant-grid">
           {tracks.map((track) => (
@@ -732,4 +862,13 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
 
 function delay(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function parseParticipantMetadata(value: string | undefined) {
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
 }

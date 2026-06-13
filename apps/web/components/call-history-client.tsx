@@ -28,6 +28,7 @@ interface Call {
   } | null;
   _count: { participants: number };
   inviteUrl: string | null;
+  hostUrl: string | null;
   isHost: boolean;
   expiresAt: string;
   host: { displayName: string; email: string };
@@ -107,7 +108,7 @@ export function CallHistoryClient() {
               new Date(call.expiresAt) > new Date() ? (
                 <>
                   <Link
-                    href={call.inviteUrl}
+                    href={call.hostUrl ?? call.inviteUrl}
                     className="button button-primary button-sm"
                   >
                     Rejoin

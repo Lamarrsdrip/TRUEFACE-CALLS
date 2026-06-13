@@ -87,10 +87,11 @@ export class RoomsService {
       expiresAt,
     });
 
+    const urls = this.buildRoomUrls(room.slug, inviteToken);
     return {
       room,
       inviteToken,
-      inviteUrl: `${process.env.APP_URL ?? "http://localhost:3000"}/call/${room.slug}?invite=${encodeURIComponent(inviteToken)}`,
+      ...urls,
     };
   }
 
@@ -136,6 +137,7 @@ export class RoomsService {
       participantCount: room._count.participants,
       passwordRequired: Boolean(room.passwordHash),
       expiresAt: room.expiresAt,
+      ...this.buildRoomUrls(room.slug, inviteToken),
     };
   }
 
@@ -232,10 +234,26 @@ export class RoomsService {
     approve: boolean,
   ) {
     await this.assertHost(roomId, hostId);
-    return this.prisma.callParticipant.update({
+    const participant = await this.prisma.callParticipant.findFirst({
       where: { id: participantId, roomId },
-      data: { state: approve ? "APPROVED" : "REJECTED" },
     });
+    if (!participant) {
+      throw new NotFoundException("Participant was not found in this room");
+    }
+    const nextState = approve ? "APPROVED" : "REJECTED";
+    const updated = await this.prisma.callParticipant.update({
+      where: { id: participantId },
+      data: { state: nextState },
+    });
+    await this.prisma.callEvent.create({
+      data: {
+        roomId,
+        actorId: hostId,
+        type: approve ? "PARTICIPANT_APPROVED" : "PARTICIPANT_REJECTED",
+        payload: { participantId },
+      },
+    });
+    return updated;
   }
 
   async userToken(roomId: string, userId: string) {
@@ -246,9 +264,32 @@ export class RoomsService {
     if (!participant?.livekitIdentity || !participant.user) {
       throw new ForbiddenException("Participant is not approved");
     }
+    const joinedAt = participant.joinedAt ?? new Date();
+    if (!participant.room.startedAt) {
+      await this.prisma.callRoom.update({
+        where: { id: roomId },
+        data: { status: "ACTIVE", startedAt: joinedAt },
+      });
+      await this.prisma.callEvent.create({
+        data: {
+          roomId,
+          actorId: userId,
+          type: "ROOM_STARTED",
+          payload: { participantId: participant.id },
+        },
+      });
+    }
     await this.prisma.callParticipant.update({
       where: { id: participant.id },
-      data: { state: "JOINED", joinedAt: new Date() },
+      data: { state: "JOINED", joinedAt },
+    });
+    await this.prisma.callEvent.create({
+      data: {
+        roomId,
+        actorId: userId,
+        type: "PARTICIPANT_JOINED",
+        payload: { participantId: participant.id, role: participant.role },
+      },
     });
     return this.providers.createLiveKitToken({
       roomName: roomId,
@@ -281,9 +322,37 @@ export class RoomsService {
     ) {
       throw new ForbiddenException("Guest access is invalid");
     }
+    const joinedAt = participant.joinedAt ?? new Date();
+    if (!participant.roomId) {
+      throw new ForbiddenException("Guest access is invalid");
+    }
+    const room = await this.prisma.callRoom.findUnique({
+      where: { id: roomId },
+      select: { startedAt: true },
+    });
+    if (!room?.startedAt) {
+      await this.prisma.callRoom.update({
+        where: { id: roomId },
+        data: { status: "ACTIVE", startedAt: joinedAt },
+      });
+      await this.prisma.callEvent.create({
+        data: {
+          roomId,
+          type: "ROOM_STARTED",
+          payload: { participantId: participant.id, guest: true },
+        },
+      });
+    }
     await this.prisma.callParticipant.update({
       where: { id: participant.id },
-      data: { state: "JOINED", joinedAt: new Date() },
+      data: { state: "JOINED", joinedAt },
+    });
+    await this.prisma.callEvent.create({
+      data: {
+        roomId,
+        type: "PARTICIPANT_JOINED",
+        payload: { participantId: participant.id, guest: true },
+      },
     });
     return this.providers.createLiveKitToken({
       roomName: roomId,
@@ -366,11 +435,20 @@ export class RoomsService {
       return {
         ...room,
         isHost,
-        inviteUrl: inviteToken
-          ? `${process.env.APP_URL ?? "http://localhost:3000"}/call/${room.slug}?invite=${encodeURIComponent(inviteToken)}`
-          : null,
+        ...(inviteToken
+          ? this.buildRoomUrls(room.slug, inviteToken)
+          : { inviteUrl: null, hostUrl: null }),
       };
     });
+  }
+
+  private buildRoomUrls(slug: string, inviteToken: string) {
+    const base = process.env.APP_URL ?? "http://localhost:3000";
+    const inviteUrl = `${base}/call/${slug}?invite=${encodeURIComponent(inviteToken)}`;
+    return {
+      inviteUrl,
+      hostUrl: `${inviteUrl}&host=1`,
+    };
   }
 
   private async assertInvite(roomId: string, token: string) {

@@ -215,26 +215,47 @@ export class ProvidersService {
     metadata: Record<string, unknown>;
     canPublish: boolean;
   }) {
+    const start = Date.now();
     const config = await this.getProvider("livekit");
     const { url, apiKey, apiSecret } = config;
     if (!url || !apiKey || !apiSecret) {
+      await this.recordProviderHealth(
+        "livekit",
+        unconfigured("LiveKit is not configured"),
+        start,
+      );
       throw new ServiceUnavailableException("LiveKit is not configured");
     }
 
-    const token = new AccessToken(apiKey, apiSecret, {
-      identity: input.identity,
-      name: input.displayName,
-      ttl: "10m",
-      metadata: JSON.stringify(input.metadata),
-    });
-    token.addGrant({
-      room: input.roomName,
-      roomJoin: true,
-      canPublish: input.canPublish,
-      canSubscribe: true,
-      canPublishData: true,
-    });
-    return { url, token: await token.toJwt() };
+    try {
+      const token = new AccessToken(apiKey, apiSecret, {
+        identity: input.identity,
+        name: input.displayName,
+        ttl: "10m",
+        metadata: JSON.stringify(input.metadata),
+      });
+      token.addGrant({
+        room: input.roomName,
+        roomJoin: true,
+        canPublish: input.canPublish,
+        canSubscribe: true,
+        canPublishData: true,
+      });
+      const jwt = await token.toJwt();
+      await this.recordProviderHealth(
+        "livekit",
+        operational("LiveKit token generated successfully"),
+        start,
+      );
+      return { url, token: jwt };
+    } catch (error) {
+      const result: ProviderTestResult = {
+        status: "down",
+        message: redactError(error),
+      };
+      await this.recordProviderHealth("livekit", result, start);
+      throw error;
+    }
   }
 
   async sendEmail(input: {
@@ -383,6 +404,32 @@ export class ProvidersService {
       },
     });
     return result;
+  }
+
+  private async recordProviderHealth(
+    provider: string,
+    result: ProviderTestResult,
+    start: number,
+  ) {
+    const latencyMs = Date.now() - start;
+    await this.prisma.providerHealth.upsert({
+      where: { provider },
+      update: {
+        status: healthStatus(result.status),
+        latencyMs,
+        errorRedacted:
+          result.status === "down" ? result.message.slice(0, 500) : null,
+        checkedAt: new Date(),
+      },
+      create: {
+        provider,
+        status: healthStatus(result.status),
+        latencyMs,
+        errorRedacted:
+          result.status === "down" ? result.message.slice(0, 500) : null,
+        checkedAt: new Date(),
+      },
+    });
   }
 
   private async s3() {

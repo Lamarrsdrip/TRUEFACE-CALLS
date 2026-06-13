@@ -35,3 +35,17 @@ npm run start:deploy
 
 No production provider secret is committed. `.env.example` contains names and
 safe placeholders only.
+
+## Launch-Readiness Addendum
+
+- `EMERGENT_COMPATIBILITY_AUDIT.md`
+- `EMERGENT_MIGRATION_PLAN.md`
+- `FEATURE_PARITY_CHECKLIST.md`
+- `CURRENT_STACK_DEPENDENCIES.md`
+- `HOST_GUEST_CALL_BUG_ANALYSIS.md`
+- `DEPLOYMENT_OPTIONS.md`
+- `LAUNCH_BLOCKERS.md`
+- `EMERGENT_DEPLOYMENT_REPORT.md`
+- `FACE_AI_STATUS.md`
+- `GPU_FACE_REPLACEMENT_ARCHITECTURE.md`
+- `LAUNCH_HARDENING_CHECKLIST.md`

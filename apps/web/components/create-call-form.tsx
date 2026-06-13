@@ -7,6 +7,7 @@ import { apiFetch, jsonBody } from "../lib/api";
 export function CreateCallForm() {
   const [result, setResult] = useState<{
     inviteUrl: string;
+    hostUrl: string;
     room: { id: string; title: string };
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +69,7 @@ export function CreateCallForm() {
           </button>
         </div>
         <div className="mt-5 flex gap-3">
-          <a href={result.inviteUrl} className="button button-primary">
+          <a href={result.hostUrl} className="button button-primary">
             <Video size={17} /> Open call room
           </a>
           <button
