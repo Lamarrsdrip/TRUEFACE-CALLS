@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Check, Minus } from "lucide-react";
 import { MarketingNav } from "../../components/marketing-nav";
+import { DeviceCompatibility } from "../../components/device-compatibility";
 import { ErrorState, LoadingState } from "../../components/ui";
 import { useApiResource } from "../../hooks/use-api-resource";
 import { moneyFromMinor } from "../../lib/format";
@@ -78,6 +79,7 @@ export default function PricingPage() {
           </article>
         ))}
       </section>
+      <DeviceCompatibility />
     </div>
   );
 }

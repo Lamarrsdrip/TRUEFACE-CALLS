@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     default: "TrueFace Calls",
     template: "%s | TrueFace Calls",
   },
-  description: "Consent-first AI face controls for secure browser video calls.",
+  description: "Consent-first face processing for secure browser video calls.",
   robots: { index: true, follow: true },
 };
 

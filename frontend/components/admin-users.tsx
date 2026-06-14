@@ -13,6 +13,12 @@ interface UserRecord {
   status: string;
   createdAt: string;
   roomCreationDisabled: boolean;
+  gender: string;
+  voicePreference: string;
+  faceProfileStatus: string;
+  faceFeaturesDisabled: boolean;
+  voiceFeaturesDisabled: boolean;
+  subscription: { planId: string; planName: string; status: string } | null;
   creditWallet: { availableMilliCredits: number } | null;
 }
 
@@ -54,6 +60,27 @@ export function AdminUsers() {
       ...jsonBody({ disabled: !user.roomCreationDisabled }),
     });
     setMessage("Room creation access updated and audited.");
+    await users.refresh();
+  }
+
+  async function toggleFeature(
+    user: UserRecord,
+    feature: "face" | "voice",
+  ) {
+    await apiFetch(`/admin/users/${user.id}/feature-access`, {
+      method: "PATCH",
+      ...jsonBody({
+        faceDisabled:
+          feature === "face"
+            ? !user.faceFeaturesDisabled
+            : user.faceFeaturesDisabled,
+        voiceDisabled:
+          feature === "voice"
+            ? !user.voiceFeaturesDisabled
+            : user.voiceFeaturesDisabled,
+      }),
+    });
+    setMessage(`${feature === "face" ? "Face" : "Voice"} access updated and audited.`);
     await users.refresh();
   }
 
@@ -114,6 +141,12 @@ export function AdminUsers() {
             <span>
               {(user.creditWallet?.availableMilliCredits ?? 0) / 1000} credits
             </span>
+            <span>{user.gender ?? "UNSET"} · {user.voicePreference ?? "ORIGINAL"}</span>
+            <span>Face: {user.faceProfileStatus.toLowerCase()}</span>
+            <span>
+              Plan: {user.subscription?.planName ?? "None"}{" "}
+              {user.subscription ? `(${user.subscription.status.toLowerCase()})` : ""}
+            </span>
             <StatusBadge tone={user.status === "ACTIVE" ? "success" : "danger"}>
               {user.status.toLowerCase()}
             </StatusBadge>
@@ -133,6 +166,18 @@ export function AdminUsers() {
               onClick={() => void toggleRoomAccess(user)}
             >
               {user.roomCreationDisabled ? "Enable rooms" : "Disable rooms"}
+            </button>
+            <button
+              className="button button-ghost button-sm"
+              onClick={() => void toggleFeature(user, "face")}
+            >
+              {user.faceFeaturesDisabled ? "Enable face" : "Disable face"}
+            </button>
+            <button
+              className="button button-ghost button-sm"
+              onClick={() => void toggleFeature(user, "voice")}
+            >
+              {user.voiceFeaturesDisabled ? "Enable voice" : "Disable voice"}
             </button>
           </article>
         ))}

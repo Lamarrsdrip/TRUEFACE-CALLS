@@ -1,9 +1,13 @@
 # Known Limitations
 
 - LiveKit must be configured and tested with two real devices.
-- Browser AI is a static approved-image compositor driven by landmarks. It
-  does not yet synthesize photorealistic eye, blink, mouth or expression
-  transfer.
+- Local enhanced face masking is a tracked and feathered approved-image
+  compositor. Blink and jaw signals influence the mask, but it is not neural,
+  photorealistic identity replacement and cannot produce full expression,
+  skin-detail or side-angle synthesis.
+- Browser male/female voice tones are modest pitch/EQ effects. They are not
+  formant-preserving identity conversion, voice cloning or studio-quality
+  cloud conversion.
 - The cloud AI/GPU fields are adapter configuration; no cloud inference worker
   is wired into the media path.
 - Browser-side AI usage can be bypassed by a modified client. Trusted LiveKit
@@ -19,3 +23,5 @@
   archives.
 - Browser and mobile Safari/Android behavior still needs real-device
   acceptance testing.
+- Browser processing can be paused by mobile background-tab, thermal and
+  battery policies; the UI warns and restores original tracks after failures.

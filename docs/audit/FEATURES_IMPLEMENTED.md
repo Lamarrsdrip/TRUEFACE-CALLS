@@ -12,8 +12,14 @@
 - LiveKit camera, microphone, screen share, chat and network UI.
 - Multi-image face profiles, browser quality checks, readiness score,
   moderation, consent revocation and physical GridFS deletion.
-- Browser MediaPipe tracking, processed canvas publication, AI disclosure,
-  tracking-loss pause and raw-camera restoration.
+- Browser MediaPipe tracking, smoothed face-oval compositing, adaptive local
+  lighting, blink/jaw-responsive geometry, processed canvas publication,
+  visible local-mask disclosure, tracking-loss pause and raw-camera restoration.
+- Persisted gender and default voice preferences plus a real browser
+  AudioWorklet tone processor that publishes transformed microphone audio.
+- Advisory phone recommendations and an automatic browser/device/FPS/camera
+  capability rating that never hard-blocks users.
+- Per-user audited admin switches for face and voice processing.
 - Admin users, plans, credits, payments, calls, reports, face moderation,
   providers, cost estimates, broadcasts, readiness and audit export.
 - Mobile-first responsive customer and admin interfaces.

@@ -302,6 +302,11 @@ def list_faces(request: Request, user: dict = Depends(current_user)) -> list[dic
 def activate_face(
     profile_id: str, request: Request, user: dict = Depends(current_user)
 ) -> dict:
+    if user.get("faceFeaturesDisabled"):
+        raise HTTPException(
+            status_code=403,
+            detail="Face processing is disabled for this account",
+        )
     ai_values = apply_provider_defaults("ai", provider_values(request, "ai"))
     if ai_values.get("enabled", "true").lower() != "true":
         raise api_error(

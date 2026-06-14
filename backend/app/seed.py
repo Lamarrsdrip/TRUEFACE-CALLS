@@ -26,6 +26,7 @@ DEFAULT_PLANS = [
         "watermarkRequired": True,
         "creditTopupsAllowed": False,
         "creditResetDays": 30,
+        "subscriptionDurationDays": 5,
         "voiceEffects": False,
         "cloudGpu": False,
         "priceMonthlyMinor": 0,
@@ -48,6 +49,7 @@ DEFAULT_PLANS = [
         "watermarkRequired": True,
         "creditTopupsAllowed": True,
         "creditResetDays": 30,
+        "subscriptionDurationDays": 30,
         "voiceEffects": False,
         "cloudGpu": False,
         "priceMonthlyMinor": 990_000,
@@ -70,6 +72,7 @@ DEFAULT_PLANS = [
         "watermarkRequired": True,
         "creditTopupsAllowed": True,
         "creditResetDays": 30,
+        "subscriptionDurationDays": 30,
         "voiceEffects": True,
         "cloudGpu": True,
         "priceMonthlyMinor": 2_490_000,
@@ -92,6 +95,7 @@ DEFAULT_PLANS = [
         "watermarkRequired": True,
         "creditTopupsAllowed": True,
         "creditResetDays": 30,
+        "subscriptionDurationDays": 30,
         "voiceEffects": True,
         "cloudGpu": True,
         "priceMonthlyMinor": 7_490_000,
@@ -157,6 +161,17 @@ def seed_database(
 ) -> None:
     ensure_indexes(db)
     now = utc_now()
+    db.users.update_many(
+        {"gender": {"$exists": False}},
+        {
+            "$set": {
+                "gender": "UNSET",
+                "voicePreference": "ORIGINAL",
+                "faceFeaturesDisabled": False,
+                "voiceFeaturesDisabled": False,
+            }
+        },
+    )
     for plan in DEFAULT_PLANS:
         existing = db.plans.find_one({"key": plan["key"]})
         if not existing:
@@ -178,6 +193,11 @@ def seed_database(
                         "updatedAt": now,
                     }
                 },
+            )
+        elif "subscriptionDurationDays" not in existing:
+            db.plans.update_one(
+                {"id": existing["id"]},
+                {"$set": {"subscriptionDurationDays": plan["subscriptionDurationDays"]}},
             )
     credit_setting = db.app_settings.find_one(
         {"namespace": "billing", "key": "credit-packs"}
@@ -232,6 +252,10 @@ def seed_database(
             "locale": "en",
             "timezone": "UTC",
             "roomCreationDisabled": False,
+            "gender": "UNSET",
+            "voicePreference": "ORIGINAL",
+            "faceFeaturesDisabled": False,
+            "voiceFeaturesDisabled": False,
             "createdAt": now,
             "updatedAt": now,
         }

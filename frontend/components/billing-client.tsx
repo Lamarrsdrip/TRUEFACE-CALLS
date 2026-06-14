@@ -6,6 +6,7 @@ import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch, jsonBody } from "../lib/api";
 import { formatDate, moneyFromMinor } from "../lib/format";
 import { ErrorState, LoadingState, PageHeader, StatusBadge } from "./ui";
+import { DeviceCompatibility } from "./device-compatibility";
 
 interface Plan {
   id: string;
@@ -174,6 +175,7 @@ export function BillingClient() {
           ))}
         </div>
       </section>
+      <DeviceCompatibility />
     </>
   );
 }

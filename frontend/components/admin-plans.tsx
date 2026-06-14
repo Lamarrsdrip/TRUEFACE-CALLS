@@ -22,6 +22,7 @@ interface PlanRecord {
   watermarkRequired: boolean;
   creditTopupsAllowed: boolean;
   creditResetDays: number;
+  subscriptionDurationDays: number;
   groupCalls: boolean;
   voiceEffects: boolean;
   cloudGpu: boolean;
@@ -53,6 +54,7 @@ export function AdminPlans() {
         watermarkRequired: form.get("watermarkRequired") === "on",
         creditTopupsAllowed: form.get("creditTopupsAllowed") === "on",
         creditResetDays: Number(form.get("creditResetDays")),
+        subscriptionDurationDays: Number(form.get("subscriptionDurationDays")),
         groupCalls: form.get("groupCalls") === "on",
         voiceEffects: form.get("voiceEffects") === "on",
         cloudGpu: form.get("cloudGpu") === "on",
@@ -173,6 +175,15 @@ export function AdminPlans() {
                   type="number"
                   min="1"
                   defaultValue={plan.creditResetDays}
+                />
+              </div>
+              <div className="field">
+                <label>Subscription duration days</label>
+                <input
+                  name="subscriptionDurationDays"
+                  type="number"
+                  min="1"
+                  defaultValue={plan.subscriptionDurationDays ?? 30}
                 />
               </div>
             </div>

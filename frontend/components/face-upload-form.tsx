@@ -271,7 +271,7 @@ export function FaceUploadForm() {
         </div>
         {[
           "I confirm this image is mine or I have permission to use it.",
-          "I consent to using this image for AI face mode in my calls.",
+          "I consent to using this image for face processing in my calls.",
           "I accept the Face Usage Terms and Privacy Policy.",
         ].map((label, index) => (
           <label className="checkbox-row" key={label}>

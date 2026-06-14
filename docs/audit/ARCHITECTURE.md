@@ -9,7 +9,8 @@ flowchart LR
   F --> L["LiveKit Cloud or server"]
   F --> P["Manual bank / Paystack / Flutterwave"]
   F --> E["Gmail SMTP / SMTP / Resend"]
-  B --> A["MediaPipe + Canvas browser AI"]
+  B --> A["MediaPipe + Canvas local enhanced mask"]
+  B --> V["Web Audio AudioWorklet voice tone"]
   F -. future .-> C["Emergent AI or GPU worker"]
 ```
 
@@ -22,4 +23,6 @@ fallback values; an encrypted admin value overrides the matching fallback.
 
 The storage and AI boundaries are adapter-ready. External R2/S3 and cloud
 face inference are configuration contracts only; the active launch adapters
-are GridFS and browser processing.
+are GridFS, local face masking and browser voice-tone processing. Both
+processed media tracks replace the original LiveKit publication and restore
+the original track if publication fails.

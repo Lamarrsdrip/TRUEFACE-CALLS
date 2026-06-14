@@ -87,6 +87,29 @@ def users(
     result = []
     for user in db.users.find(query).sort("createdAt", -1):
         wallet = db.credit_wallets.find_one({"userId": user["id"]})
+        subscription = db.subscriptions.find_one(
+            {
+                "userId": user["id"],
+                "status": {"$in": ["ACTIVE", "TRIALING"]},
+            }
+        )
+        plan = db.plans.find_one({"id": subscription["planId"]}) if subscription else None
+        face_states = {
+            item.get("moderationStatus")
+            for item in db.face_profiles.find(
+                {"userId": user["id"], "deletedAt": None},
+                {"moderationStatus": 1},
+            )
+        }
+        face_status = (
+            "READY"
+            if "APPROVED" in face_states
+            else "PENDING"
+            if "PENDING" in face_states
+            else "ACTION_REQUIRED"
+            if face_states
+            else "NONE"
+        )
         result.append(
             {
                 **json_safe(
@@ -99,6 +122,10 @@ def users(
                             "status",
                             "createdAt",
                             "roomCreationDisabled",
+                            "gender",
+                            "voicePreference",
+                            "faceFeaturesDisabled",
+                            "voiceFeaturesDisabled",
                         ]
                     }
                 ),
@@ -107,6 +134,16 @@ def users(
                 )
                 if wallet
                 else None,
+                "faceProfileStatus": face_status,
+                "subscription": (
+                    {
+                        "status": subscription["status"],
+                        "planId": subscription["planId"],
+                        "planName": plan["name"] if plan else "Unknown",
+                    }
+                    if subscription
+                    else None
+                ),
             }
         )
     return result
@@ -164,6 +201,42 @@ def room_access(
     )
     audit(request.app.state.db, "ROOM_ACCESS_UPDATED", "USER", user["id"], admin["id"], user_id, after={"disabled": disabled})
     return {"id": user_id, "roomCreationDisabled": disabled}
+
+
+@router.patch("/users/{user_id}/feature-access")
+def feature_access(
+    user_id: str,
+    body: dict,
+    request: Request,
+    user: dict = Depends(current_user),
+    admin: dict = Depends(current_admin),
+) -> dict:
+    require_permission(admin, "users:write")
+    if not request.app.state.db.users.find_one({"id": user_id}):
+        raise HTTPException(status_code=404, detail="User not found")
+    if not isinstance(body.get("faceDisabled"), bool) or not isinstance(
+        body.get("voiceDisabled"), bool
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Face and voice feature settings must be true or false",
+        )
+    changes = {
+        "faceFeaturesDisabled": bool(body.get("faceDisabled")),
+        "voiceFeaturesDisabled": bool(body.get("voiceDisabled")),
+        "updatedAt": utc_now(),
+    }
+    request.app.state.db.users.update_one({"id": user_id}, {"$set": changes})
+    audit(
+        request.app.state.db,
+        "USER_MEDIA_FEATURES_UPDATED",
+        "USER",
+        user["id"],
+        admin["id"],
+        user_id,
+        after=changes,
+    )
+    return {"id": user_id, **changes}
 
 
 @router.get("/subscriptions")
@@ -488,7 +561,7 @@ def update_plan(
         "maxFaceProfiles", "maxImagesPerProfile", "maxParticipants",
         "maxCallMinutes", "maxGroupCalls", "allowedQualities",
         "watermarkRequired", "creditTopupsAllowed", "creditResetDays",
-        "groupCalls", "voiceEffects", "cloudGpu", "enabled",
+        "subscriptionDurationDays", "groupCalls", "voiceEffects", "cloudGpu", "enabled",
     }
     changes = {key: value for key, value in body.items() if key in allowed}
     changes["currency"] = NAIRA_CURRENCY

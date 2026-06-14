@@ -224,7 +224,7 @@ export function DashboardClient() {
           </section>
           <div className="notice notice-info mt-4">
             <ShieldCheck size={18} />
-            AI face mode always requires an approved profile and shows a
+            Local face processing always requires an approved profile and shows a
             participant-visible disclosure throughout the call.
           </div>
         </>

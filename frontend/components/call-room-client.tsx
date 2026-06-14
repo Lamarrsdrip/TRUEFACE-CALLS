@@ -10,6 +10,7 @@ import {
 } from "@livekit/components-react";
 import {
   ConnectionQuality,
+  LocalAudioTrack,
   LocalVideoTrack,
   RoomEvent,
   Track,
@@ -28,6 +29,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  Waves,
   Wifi,
   X,
 } from "lucide-react";
@@ -35,6 +37,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch, jsonBody } from "../lib/api";
 import { BrowserFaceSession } from "../lib/browser-face-session";
+import {
+  BrowserVoiceSession,
+  browserVoiceSupport,
+  type VoicePreference,
+} from "../lib/browser-voice-session";
+import { processingStatus } from "../lib/processing-status";
+import { replacePublishedTrack } from "../lib/media-engine";
 import {
   getJoinButtonLabel,
   isJoinButtonDisabled,
@@ -70,6 +79,16 @@ interface WaitingParticipant {
   guestName: string | null;
   createdAt: string;
   user: { displayName: string | null; avatarUrl: string | null } | null;
+}
+
+interface AccountSession {
+  voicePreference: VoicePreference;
+  faceFeaturesDisabled: boolean;
+  voiceFeaturesDisabled: boolean;
+  entitlements: {
+    voiceEffects: boolean;
+    allowedQualities: string[];
+  };
 }
 
 export function CallRoomClient({ slug }: { slug: string }) {
@@ -388,7 +407,7 @@ export function CallRoomClient({ slug }: { slug: string }) {
                 <CheckCircle2 /> Camera and microphone stay under your control.
               </p>
               <p>
-                <CheckCircle2 /> AI face mode is optional and visibly disclosed.
+                <CheckCircle2 /> Local face masking is optional and visibly disclosed.
               </p>
               <p>
                 <CheckCircle2 /> The host may need to approve your entry.
@@ -445,6 +464,14 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   const [selectedFace, setSelectedFace] = useState("");
   const [wallet, setWallet] = useState(0);
   const [accountAiAvailable, setAccountAiAvailable] = useState(false);
+  const [accountVoiceAvailable, setAccountVoiceAvailable] = useState(false);
+  const [voicePreference, setVoicePreference] =
+    useState<VoicePreference>("ORIGINAL");
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [processingLabel, setProcessingLabel] = useState(
+    processingStatus("browser", false).label,
+  );
   const [quality, setQuality] = useState<"low" | "standard" | "hd">(
     typeof window !== "undefined" && window.innerWidth < 700
       ? "low"
@@ -459,7 +486,18 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   const aiSession = useRef<BrowserFaceSession | null>(null);
   const rawTrack = useRef<LocalVideoTrack | null>(null);
   const processedTrack = useRef<LocalVideoTrack | null>(null);
+  const voiceSession = useRef<BrowserVoiceSession | null>(null);
+  const rawAudioTrack = useRef<LocalAudioTrack | null>(null);
+  const processedAudioTrack = useRef<LocalAudioTrack | null>(null);
   const meter = useRef({
+    reservationId: "",
+    remaining: 0,
+    rate: 0,
+    interval: 0 as ReturnType<typeof setInterval> | number,
+    window: 0,
+    settling: false,
+  });
+  const voiceMeter = useRef({
     reservationId: "",
     remaining: 0,
     rate: 0,
@@ -469,24 +507,30 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   });
 
   useEffect(() => {
-    void apiFetch("/auth/session")
-      .then(() =>
+    void apiFetch<AccountSession>("/auth/session")
+      .then((account) =>
         Promise.all([
           apiFetch<FaceProfile[]>("/faces"),
           apiFetch<{ availableMilliCredits: number }>("/credits/wallet"),
+          Promise.resolve(account),
         ]),
       )
-      .then(([profiles, creditWallet]) => {
+      .then(([profiles, creditWallet, account]) => {
         const approved = profiles.filter(
           (profile) => profile.moderationStatus === "APPROVED",
         );
         setFaces(approved);
         setSelectedFace(approved[0]?.id ?? "");
         setWallet(creditWallet.availableMilliCredits);
-        setAccountAiAvailable(true);
+        setAccountAiAvailable(!account.faceFeaturesDisabled);
+        setAccountVoiceAvailable(
+          !account.voiceFeaturesDisabled && account.entitlements.voiceEffects,
+        );
+        setVoicePreference(account.voicePreference);
       })
       .catch(() => {
         setAccountAiAvailable(false);
+        setAccountVoiceAvailable(false);
       });
   }, []);
 
@@ -504,6 +548,28 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       room.off(RoomEvent.ConnectionQualityChanged, listener);
     };
   }, [room]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden && (aiActive || voiceActive)) {
+        setError(
+          "Background tabs may pause camera or audio processing on mobile. Keep TrueFace visible for stable effects.",
+        );
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const batteryNavigator = navigator as Navigator & {
+      getBattery?: () => Promise<{ level: number; charging: boolean }>;
+    };
+    void batteryNavigator.getBattery?.().then((battery) => {
+      if (battery.level <= 0.15 && !battery.charging) {
+        setError(
+          "Low battery may reduce frame rate or trigger thermal throttling. Use Basic quality or connect a charger.",
+        );
+      }
+    });
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [aiActive, voiceActive]);
 
   const metadata = parseParticipantMetadata(room.localParticipant.metadata);
   const isHost = shouldShowHostControls({
@@ -582,9 +648,68 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
     };
   }, [aiActive, room, roomInfo.id]);
 
+  const disableVoice = useCallback(async () => {
+    if (
+      !voiceActive &&
+      !processedAudioTrack.current &&
+      !rawAudioTrack.current &&
+      !voiceMeter.current.reservationId
+    ) {
+      return;
+    }
+    if (voiceMeter.current.interval) clearInterval(voiceMeter.current.interval);
+    if (processedAudioTrack.current) {
+      await room.localParticipant.unpublishTrack(
+        processedAudioTrack.current,
+        true,
+      );
+      processedAudioTrack.current = null;
+    }
+    await voiceSession.current?.stop();
+    voiceSession.current = null;
+    const currentMicrophone = room.localParticipant.getTrackPublication(
+      Track.Source.Microphone,
+    )?.track;
+    if (rawAudioTrack.current && currentMicrophone !== rawAudioTrack.current) {
+      await room.localParticipant.publishTrack(rawAudioTrack.current, {
+        source: Track.Source.Microphone,
+      });
+    }
+    rawAudioTrack.current = null;
+    if (voiceMeter.current.reservationId) {
+      const released = await apiFetch<{ amountMilli: number }>(
+        "/credits/meter/release",
+        {
+          method: "POST",
+          ...jsonBody({
+            reservationId: voiceMeter.current.reservationId,
+            idempotencyKey: `voice-release:${roomInfo.id}:${Date.now()}`,
+          }),
+        },
+      );
+      setWallet((value) => value + Math.max(0, released.amountMilli));
+    }
+    voiceMeter.current = {
+      reservationId: "",
+      remaining: 0,
+      rate: 0,
+      interval: 0,
+      window: 0,
+      settling: false,
+    };
+    await room.localParticipant.setMetadata(
+      JSON.stringify({
+        ...parseParticipantMetadata(room.localParticipant.metadata),
+        voiceEffectActive: false,
+      }),
+    );
+    setVoiceActive(false);
+  }, [room, roomInfo.id, voiceActive]);
+
   useEffect(() => {
     const releaseOnExit = () => {
       void disableAi();
+      void disableVoice();
     };
     room.on(RoomEvent.Disconnected, releaseOnExit);
     window.addEventListener("pagehide", releaseOnExit);
@@ -592,12 +717,14 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       room.off(RoomEvent.Disconnected, releaseOnExit);
       window.removeEventListener("pagehide", releaseOnExit);
     };
-  }, [disableAi, room]);
+  }, [disableAi, disableVoice, room]);
 
   useEffect(
     () => () => {
       aiSession.current?.stop();
+      void voiceSession.current?.stop();
       if (meter.current.interval) clearInterval(meter.current.interval);
+      if (voiceMeter.current.interval) clearInterval(voiceMeter.current.interval);
     },
     [],
   );
@@ -616,10 +743,20 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       meter.current.rate = reserved.milliCreditsPerMinute;
       setWallet((value) => value - reserved.reservationMilli);
 
-      const activation = await apiFetch<{ faceImageUrl: string }>(
+      const activation = await apiFetch<{
+        faceImageUrl: string;
+        processingMode: "browser" | "cloud";
+      }>(
         `/faces/${selectedFace}/activate`,
         { method: "POST", ...jsonBody({}) },
       );
+      const modeStatus = processingStatus(activation.processingMode, false);
+      if (!modeStatus.available || activation.processingMode === "cloud") {
+        throw new Error(
+          "Cloud AI face swap is unavailable until a realtime GPU worker is connected",
+        );
+      }
+      setProcessingLabel(modeStatus.label);
       const publication = room.localParticipant.getTrackPublication(
         Track.Source.Camera,
       );
@@ -640,11 +777,22 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       });
       const browserTrack = await session.start();
       const nextProcessed = new LocalVideoTrack(browserTrack);
-      await room.localParticipant.unpublishTrack(localTrack, false);
       try {
-        await room.localParticipant.publishTrack(nextProcessed, {
-          source: Track.Source.Camera,
-          name: "ai-face-processed",
+        await replacePublishedTrack({
+          async unpublishOriginal() {
+            await room.localParticipant.unpublishTrack(localTrack, false);
+          },
+          async publishProcessed() {
+            await room.localParticipant.publishTrack(nextProcessed, {
+              source: Track.Source.Camera,
+              name: "local-face-mask",
+            });
+          },
+          async restoreOriginal() {
+            await room.localParticipant.publishTrack(localTrack, {
+              source: Track.Source.Camera,
+            });
+          },
         });
       } catch (publishError) {
         session.stop();
@@ -673,7 +821,7 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       setError(
         value instanceof Error
           ? `${value.message}. AI mode was stopped and the normal camera was restored.`
-          : "AI face activation failed",
+          : "Local face mask activation failed",
       );
     } finally {
       setAiBusy(false);
@@ -742,14 +890,163 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   }
 
   async function toggleMic() {
+    if (voiceActive) {
+      setError("Turn off the voice changer before changing the raw microphone state.");
+      return;
+    }
     const next = !mic;
     await room.localParticipant.setMicrophoneEnabled(next);
     setMic(next);
   }
 
+  async function enableVoice() {
+    if (voicePreference === "ORIGINAL") {
+      setError("Choose the male or female browser tone first.");
+      return;
+    }
+    const support = browserVoiceSupport();
+    if (!support.supported) {
+      setError(support.reason);
+      return;
+    }
+    setVoiceBusy(true);
+    setError(null);
+    try {
+      const reserved = await reserveVoiceCredits();
+      voiceMeter.current.reservationId = reserved.id;
+      voiceMeter.current.remaining = reserved.reservationRemainingMilli;
+      voiceMeter.current.rate = reserved.milliCreditsPerMinute;
+      setWallet((value) => value - reserved.reservationMilli);
+      const publication = room.localParticipant.getTrackPublication(
+        Track.Source.Microphone,
+      );
+      const localTrack = publication?.track;
+      if (!(localTrack instanceof LocalAudioTrack)) {
+        throw new Error("Microphone track is unavailable");
+      }
+      rawAudioTrack.current = localTrack;
+      const session = new BrowserVoiceSession(
+        localTrack.mediaStreamTrack,
+        voicePreference,
+      );
+      const browserTrack = await session.start();
+      const transformed = new LocalAudioTrack(browserTrack);
+      try {
+        await replacePublishedTrack({
+          async unpublishOriginal() {
+            await room.localParticipant.unpublishTrack(localTrack, false);
+          },
+          async publishProcessed() {
+            await room.localParticipant.publishTrack(transformed, {
+              source: Track.Source.Microphone,
+              name: "browser-voice-tone",
+            });
+          },
+          async restoreOriginal() {
+            await room.localParticipant.publishTrack(localTrack, {
+              source: Track.Source.Microphone,
+            });
+          },
+        });
+      } catch (publishError) {
+        await session.stop();
+        throw publishError;
+      }
+      voiceSession.current = session;
+      processedAudioTrack.current = transformed;
+      await room.localParticipant.setMetadata(
+        JSON.stringify({
+          ...parseParticipantMetadata(room.localParticipant.metadata),
+          voiceEffectActive: true,
+          voiceEffectType: voicePreference,
+        }),
+      );
+      setVoiceActive(true);
+      voiceMeter.current.interval = setInterval(() => {
+        void settleVoiceWindow();
+      }, 15_000);
+    } catch (value) {
+      try {
+        await disableVoice();
+      } catch {
+        // Preserve the original processing error.
+      }
+      setError(
+        value instanceof Error
+          ? `${value.message}. The original microphone was restored.`
+          : "Browser voice processing failed",
+      );
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
+  async function reserveVoiceCredits() {
+    return apiFetch<{
+      id: string;
+      reservationMilli: number;
+      reservationRemainingMilli: number;
+      milliCreditsPerMinute: number;
+    }>("/credits/meter/reserve", {
+      method: "POST",
+      ...jsonBody({
+        roomId: roomInfo.id,
+        mode: "VOICE_EFFECT",
+        quality: quality.toUpperCase(),
+        idempotencyKey: `voice-reserve:${roomInfo.id}:${Date.now()}`,
+      }),
+    });
+  }
+
+  async function settleVoiceWindow() {
+    if (voiceMeter.current.settling || !voiceMeter.current.reservationId) return;
+    voiceMeter.current.settling = true;
+    try {
+      const expectedCharge = Math.ceil(
+        (15_000 * voiceMeter.current.rate) / 60_000,
+      );
+      if (voiceMeter.current.remaining < expectedCharge) {
+        const released = await apiFetch<{ amountMilli: number }>(
+          "/credits/meter/release",
+          {
+            method: "POST",
+            ...jsonBody({
+              reservationId: voiceMeter.current.reservationId,
+              idempotencyKey: `voice-release:${roomInfo.id}:${Date.now()}`,
+            }),
+          },
+        );
+        setWallet((value) => value + Math.max(0, released.amountMilli));
+        const next = await reserveVoiceCredits();
+        voiceMeter.current.reservationId = next.id;
+        voiceMeter.current.remaining = next.reservationRemainingMilli;
+        voiceMeter.current.rate = next.milliCreditsPerMinute;
+        setWallet((value) => value - next.reservationMilli);
+      }
+      const currentWindow = voiceMeter.current.window++;
+      const usage = await apiFetch<{ milliCreditsCharged: number }>(
+        "/credits/meter/settle",
+        {
+          method: "POST",
+          ...jsonBody({
+            reservationId: voiceMeter.current.reservationId,
+            meteringWindow: `voice:${roomInfo.id}:${room.localParticipant.identity}:${currentWindow}:${Date.now()}`,
+            billableMilliseconds: 15_000,
+          }),
+        },
+      );
+      voiceMeter.current.remaining -= usage.milliCreditsCharged;
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Voice metering stopped");
+      await disableVoice();
+    } finally {
+      voiceMeter.current.settling = false;
+    }
+  }
+
   async function toggleCamera() {
     if (aiActive) {
-      setError("Turn off AI face mode before changing the raw camera state.");
+      setError("Turn off the local face mask before changing the raw camera state.");
       return;
     }
     const next = !camera;
@@ -766,11 +1063,13 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   async function endCall() {
     if (!isHost) {
       await disableAi();
+      await disableVoice();
       room.disconnect();
       return;
     }
     try {
       await disableAi();
+      await disableVoice();
       await apiFetch(`/rooms/${roomInfo.id}/end`, {
         method: "POST",
         ...jsonBody({}),
@@ -815,7 +1114,12 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
         <div className="call-statuses">
           {aiActive ? (
             <span className="ai-active">
-              <Sparkles size={14} /> AI Face Active · {trackingState}
+              <Sparkles size={14} /> {processingLabel} · {trackingState}
+            </span>
+          ) : null}
+          {voiceActive ? (
+            <span className="ai-active">
+              <Waves size={14} /> Browser voice tone active
             </span>
           ) : null}
           <span>
@@ -936,7 +1240,7 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
         </button>
         {accountAiAvailable ? <div className="ai-control">
           <select
-            aria-label="AI face profile"
+            aria-label="Face profile"
             value={selectedFace}
             onChange={(event) => setSelectedFace(event.target.value)}
             disabled={aiActive}
@@ -949,16 +1253,16 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
             ))}
           </select>
           <select
-            aria-label="AI quality"
+            aria-label="Local mask quality"
             value={quality}
             onChange={(event) =>
               setQuality(event.target.value as "low" | "standard" | "hd")
             }
             disabled={aiActive}
           >
-            <option value="low">Low 360p</option>
+            <option value="low">Basic 360p</option>
             <option value="standard">Standard 480p</option>
-            <option value="hd">HD 720p</option>
+            <option value="hd">Pro 720p</option>
           </select>
           <button
             className={aiActive ? "call-control ai enabled" : "call-control ai"}
@@ -966,9 +1270,35 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
             disabled={aiBusy}
           >
             {aiBusy ? <LoaderCircle className="spin" /> : <Sparkles />}
-            <span>{aiActive ? "AI on" : "AI face"}</span>
+            <span>{aiActive ? "Mask on" : "Face mask"}</span>
           </button>
         </div> : null}
+        {accountVoiceAvailable ? (
+          <div className="ai-control">
+            <select
+              aria-label="Voice tone"
+              value={voicePreference}
+              onChange={(event) =>
+                setVoicePreference(event.target.value as VoicePreference)
+              }
+              disabled={voiceActive}
+            >
+              <option value="ORIGINAL">Original voice</option>
+              <option value="MALE_TONE">Male tone</option>
+              <option value="FEMALE_TONE">Female tone</option>
+            </select>
+            <button
+              className={voiceActive ? "call-control ai enabled" : "call-control ai"}
+              onClick={() =>
+                void (voiceActive ? disableVoice() : enableVoice())
+              }
+              disabled={voiceBusy}
+            >
+              {voiceBusy ? <LoaderCircle className="spin" /> : <Waves />}
+              <span>{voiceActive ? "Voice on" : "Voice tone"}</span>
+            </button>
+          </div>
+        ) : null}
         <button className="call-control end" onClick={() => void endCall()}>
           <PhoneOff />
           <span>{isHost ? "End" : "Leave"}</span>

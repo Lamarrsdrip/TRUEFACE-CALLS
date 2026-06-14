@@ -32,8 +32,13 @@ Final verification on June 14, 2026:
 Important limits:
 
 - LiveKit credentials are required before any real call can start.
-- Browser AI is currently a tracked 2D face compositor, not a photorealistic
-  generative face-swap model.
+- Browser mode is labelled `Local enhanced face mask`. It uses smoothed
+  MediaPipe tracking, face-oval clipping, feathering and adaptive compositing,
+  but remains non-photorealistic.
+- Browser voice tone publishes processed audio with AudioWorklet. It is a
+  modest tone effect, not neural conversion or voice cloning.
+- Cloud AI face swap remains unavailable until a real realtime GPU/video
+  worker is configured and healthy.
 - Administrator TOTP MFA and server-authoritative AI runtime telemetry remain
   pre-public-launch work.
 

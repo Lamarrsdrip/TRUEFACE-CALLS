@@ -51,7 +51,7 @@ export interface PublicationPort {
   publishProcessedTrack(track: MediaStreamTrack): Promise<void>;
   publishAiDisclosure(active: boolean): Promise<void>;
   stopProcessedTrack(track: MediaStreamTrack): void;
-  requestRawCameraRestore?(): void;
+  restoreRawCamera?(): Promise<void>;
 }
 
 export class AiPublicationCoordinator {
@@ -68,7 +68,7 @@ export class AiPublicationCoordinator {
       await this.port.publishAiDisclosure(true);
     } catch (error) {
       this.port.stopProcessedTrack(track);
-      this.port.requestRawCameraRestore?.();
+      await this.port.restoreRawCamera?.();
       throw error;
     }
   }
@@ -79,6 +79,20 @@ export class AiPublicationCoordinator {
       this.activeTrack = null;
     }
     await this.port.publishAiDisclosure(false);
+  }
+}
+
+export async function replacePublishedTrack(port: {
+  unpublishOriginal(): Promise<void>;
+  publishProcessed(): Promise<void>;
+  restoreOriginal(): Promise<void>;
+}) {
+  await port.unpublishOriginal();
+  try {
+    await port.publishProcessed();
+  } catch (error) {
+    await port.restoreOriginal();
+    throw error;
   }
 }
 

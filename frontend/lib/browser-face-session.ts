@@ -21,6 +21,12 @@ const profiles = {
   hd: { width: 1280, height: 720, fps: 30 },
 };
 
+const FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379,
+  378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127,
+  162, 21, 54, 103, 67, 109,
+];
+
 export class BrowserFaceSession {
   readonly canvas = document.createElement("canvas");
   readonly video = document.createElement("video");
@@ -35,6 +41,7 @@ export class BrowserFaceSession {
     recoveryFrameThreshold: 4,
     minimumConfidence: 0.62,
   });
+  private smoothed = { centerX: 0, centerY: 0, width: 0, height: 0, angle: 0 };
 
   constructor(private readonly options: BrowserFaceSessionOptions) {
     const profile = profiles[options.quality];
@@ -141,7 +148,7 @@ export class BrowserFaceSession {
       context.font = "600 18px system-ui";
       context.textAlign = "center";
       context.fillText(
-        "AI face paused — tracking lost",
+        "Local face mask paused - tracking lost",
         this.canvas.width / 2,
         this.canvas.height / 2,
       );
@@ -166,38 +173,101 @@ export class BrowserFaceSession {
     const centerX = ((minX + maxX) / 2) * this.canvas.width;
     const centerY = ((minY + maxY) / 2) * this.canvas.height;
     const jawOpen = blendshapes.jawOpen ?? 0;
-    const width = (maxX - minX) * this.canvas.width * 1.34;
-    const height = (maxY - minY) * this.canvas.height * (1.42 + jawOpen * 0.08);
+    const width = (maxX - minX) * this.canvas.width * 1.3;
+    const height = (maxY - minY) * this.canvas.height * (1.38 + jawOpen * 0.12);
     const leftEye = landmarks[33];
     const rightEye = landmarks[263];
     const angle =
       leftEye && rightEye
         ? Math.atan2(rightEye.y - leftEye.y, 1 - rightEye.x - (1 - leftEye.x))
         : 0;
+    const smoothing = state === "degraded" ? 0.08 : 0.22;
+    const previous = this.smoothed;
+    const next = {
+      centerX: previous.width
+        ? previous.centerX + (centerX - previous.centerX) * smoothing
+        : centerX,
+      centerY: previous.height
+        ? previous.centerY + (centerY - previous.centerY) * smoothing
+        : centerY,
+      width: previous.width
+        ? previous.width + (width - previous.width) * smoothing
+        : width,
+      height: previous.height
+        ? previous.height + (height - previous.height) * smoothing
+        : height,
+      angle: previous.width
+        ? previous.angle + (angle - previous.angle) * smoothing
+        : angle,
+    };
+    this.smoothed = next;
 
     context.save();
-    context.translate(centerX, centerY);
-    context.rotate(angle);
+    context.translate(next.centerX, next.centerY);
+    context.rotate(next.angle);
     context.beginPath();
-    context.ellipse(0, 0, width / 2, height / 2, 0, 0, Math.PI * 2);
+    FACE_OVAL.forEach((index, position) => {
+      const point = landmarks[index];
+      const x = (1 - point.x) * this.canvas.width - next.centerX;
+      const y = point.y * this.canvas.height - next.centerY;
+      if (position === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.closePath();
     context.clip();
     context.globalAlpha = state === "degraded" ? 0.82 : 0.96;
-    context.filter = "saturate(0.94) contrast(1.03) brightness(1.02)";
-    context.drawImage(this.faceImage!, -width / 2, -height / 2, width, height);
+    context.filter =
+      state === "degraded"
+        ? "blur(1.2px) saturate(0.9) contrast(1.02)"
+        : "saturate(0.94) contrast(1.04) brightness(1.01)";
+    context.drawImage(
+      this.faceImage!,
+      -next.width / 2,
+      -next.height / 2,
+      next.width,
+      next.height,
+    );
     context.filter = "none";
     context.globalCompositeOperation = "soft-light";
     const lighting = context.createRadialGradient(
-      -width * 0.18,
-      -height * 0.2,
+      -next.width * 0.18,
+      -next.height * 0.2,
       0,
       0,
       0,
-      width,
+      next.width,
     );
     lighting.addColorStop(0, "rgba(255,255,255,0.18)");
     lighting.addColorStop(1, "rgba(0,0,0,0.18)");
     context.fillStyle = lighting;
-    context.fillRect(-width / 2, -height / 2, width, height);
+    context.fillRect(
+      -next.width / 2,
+      -next.height / 2,
+      next.width,
+      next.height,
+    );
+    context.restore();
+
+    // A soft contour hides hard mask edges while retaining the live camera
+    // underneath. Blink and jaw blendshapes influence opacity and geometry,
+    // but this local mode remains an enhanced mask rather than neural swap.
+    const blink =
+      ((blendshapes.eyeBlinkLeft ?? 0) + (blendshapes.eyeBlinkRight ?? 0)) / 2;
+    context.save();
+    context.globalAlpha = 0.08 + Math.min(0.08, blink * 0.08);
+    context.filter = "blur(8px)";
+    context.strokeStyle = "rgba(20, 20, 24, 0.55)";
+    context.lineWidth = Math.max(6, next.width * 0.035);
+    context.beginPath();
+    FACE_OVAL.forEach((index, position) => {
+      const point = landmarks[index];
+      const x = (1 - point.x) * this.canvas.width;
+      const y = point.y * this.canvas.height;
+      if (position === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.closePath();
+    context.stroke();
     context.restore();
   }
 }

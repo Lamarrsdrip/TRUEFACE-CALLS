@@ -72,6 +72,7 @@ def _rate_context(
     db, user_id: str, room_id: str, mode: str, quality: str
 ) -> dict:
     room = db.call_rooms.find_one({"id": room_id})
+    account = db.users.find_one({"id": user_id}) or {}
     if (
         not room
         or room.get("status") not in {"OPEN", "ACTIVE"}
@@ -101,6 +102,10 @@ def _rate_context(
         raise HTTPException(status_code=422, detail="Unknown usage mode")
     if normalized_mode == "VOICE_EFFECT" and not plan.get("voiceEffects", False):
         raise HTTPException(status_code=403, detail="Voice effects are not included in your plan")
+    if normalized_mode == "VOICE_EFFECT" and account.get("voiceFeaturesDisabled"):
+        raise HTTPException(status_code=403, detail="Voice processing is disabled for this account")
+    if normalized_mode == "AI_FACE" and account.get("faceFeaturesDisabled"):
+        raise HTTPException(status_code=403, detail="Face processing is disabled for this account")
     if normalized_mode == "CLOUD_GPU" and not plan.get("cloudGpu", False):
         raise HTTPException(status_code=403, detail="Cloud GPU is not included in your plan")
     rates = usage_rates(db)

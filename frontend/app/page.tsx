@@ -19,9 +19,9 @@ export default function LandingPage() {
           <div className="hero-copy">
             <h1>Be present, on your terms.</h1>
             <p>
-              Secure browser video calls with consent-first AI face controls,
-              clear disclosure, and no raw camera publication while AI mode is
-              active.
+              Secure browser video calls with consent-first local face controls,
+              clear disclosure, and no raw camera publication while local
+              processing is active.
             </p>
             <div className="hero-actions">
               <Link href="/signup" className="button button-primary">
@@ -47,7 +47,7 @@ export default function LandingPage() {
           <div className="hero-call" aria-label="Product call room preview">
             <div className="hero-call-top">
               <span className="ai-active">
-                <Sparkles size={14} /> AI Face Active
+                <Sparkles size={14} /> Local Face Mask Active
               </span>
               <span>
                 <LockKeyhole size={13} /> Secure call
@@ -66,7 +66,7 @@ export default function LandingPage() {
             </div>
             <div className="hero-call-notice">
               <ShieldCheck size={15} />
-              Everyone in this call can see that AI face mode is active.
+              Everyone in this call can see that local face processing is active.
             </div>
           </div>
         </div>
@@ -82,9 +82,9 @@ export default function LandingPage() {
 
       <section className="product-section" id="product">
         <div className="section-heading">
-          <h2>A real call platform, with a safer AI layer.</h2>
+          <h2>A real call platform, with a transparent processing layer.</h2>
           <p>
-            The ordinary call remains familiar. AI processing is optional,
+            The ordinary call remains familiar. Face processing is optional,
             metered, reversible, and visible to every participant.
           </p>
         </div>
@@ -103,7 +103,7 @@ export default function LandingPage() {
             <div className="feature-icon">
               <Eye />
             </div>
-            <h3>Visible AI disclosure</h3>
+            <h3>Visible processing disclosure</h3>
             <p>
               Synthetic face use is persistently signaled through the call
               interface and participant metadata. It cannot be hidden locally.
@@ -126,10 +126,10 @@ export default function LandingPage() {
         <div className="workflow-copy">
           <h2>From camera to call, without publishing the raw track.</h2>
           <p>
-            When AI mode starts, TrueFace removes the camera publication,
+            When the local mask starts, TrueFace removes the camera publication,
             processes frames locally, and publishes only the canvas-generated
-            track. Tracking failure pauses AI instead of quietly exposing raw
-            video.
+            track. Tracking failure pauses the mask instead of quietly exposing
+            raw video.
           </p>
           <Link href="/security" className="button button-secondary">
             Read the security model
@@ -164,7 +164,7 @@ export default function LandingPage() {
         <div>
           <h2>Start with trial credits. Keep every call accountable.</h2>
           <p>
-            One face profile, a short AI call, clear usage rates, and abuse
+            One face profile, a short processed call, clear usage rates, and abuse
             reporting from day one.
           </p>
         </div>

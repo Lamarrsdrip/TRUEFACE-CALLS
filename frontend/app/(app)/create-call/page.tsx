@@ -6,7 +6,7 @@ export default function CreateCallPage() {
     <>
       <PageHeader
         title="Create a secure call"
-        description="Set the room policy first. AI face mode remains optional for each participant."
+        description="Set the room policy first. Local face processing remains optional for each participant."
       />
       <CreateCallForm />
     </>

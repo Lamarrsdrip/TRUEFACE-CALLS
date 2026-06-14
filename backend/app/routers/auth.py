@@ -4,11 +4,13 @@ import logging
 import re
 import uuid
 from datetime import timedelta
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from ..email_service import send_email
+from ..entitlements import current_entitlement
 from ..face_storage import purge_face_profile_data
 from ..provider_policy import CONFIGURED, provider_configuration_status
 from ..routers.providers import provider_values
@@ -36,6 +38,14 @@ class SignupBody(BaseModel):
 class LoginBody(BaseModel):
     email: str = Field(min_length=5, max_length=320)
     password: str = Field(min_length=1, max_length=128)
+
+
+class ProfileBody(BaseModel):
+    displayName: Optional[str] = Field(default=None, min_length=2, max_length=80)
+    gender: Optional[Literal["MALE", "FEMALE", "UNSET"]] = None
+    voicePreference: Optional[
+        Literal["MALE_TONE", "FEMALE_TONE", "ORIGINAL"]
+    ] = None
 
 
 def _set_cookies(response: Response, access: str, refresh: str, secure: bool) -> None:
@@ -81,6 +91,10 @@ def _safe_user(user: dict) -> dict:
         "emailVerifiedAt": iso(user.get("emailVerifiedAt")),
         "locale": user.get("locale", "en"),
         "timezone": user.get("timezone", "UTC"),
+        "gender": user.get("gender", "UNSET"),
+        "voicePreference": user.get("voicePreference", "ORIGINAL"),
+        "faceFeaturesDisabled": bool(user.get("faceFeaturesDisabled", False)),
+        "voiceFeaturesDisabled": bool(user.get("voiceFeaturesDisabled", False)),
         "createdAt": iso(user.get("createdAt")),
     }
 
@@ -149,6 +163,10 @@ def signup(body: SignupBody, request: Request, response: Response) -> dict:
         "locale": "en",
         "timezone": "UTC",
         "roomCreationDisabled": False,
+        "gender": "UNSET",
+        "voicePreference": "ORIGINAL",
+        "faceFeaturesDisabled": False,
+        "voiceFeaturesDisabled": False,
         "createdAt": now,
         "updatedAt": now,
     }
@@ -277,6 +295,30 @@ def session(
         {"userId": user["id"], "active": True}
     )
     result = _safe_user(user)
+    plan, subscription = current_entitlement(request.app.state.db, user["id"])
+    result["entitlements"] = {
+        "planKey": plan["key"],
+        "voiceEffects": bool(plan.get("voiceEffects", False)),
+        "allowedQualities": plan.get("allowedQualities", ["LOW"]),
+        "subscriptionStatus": subscription.get("status") if subscription else None,
+    }
+    faces = list(
+        request.app.state.db.face_profiles.find(
+            {"userId": user["id"], "deletedAt": None},
+            {"moderationStatus": 1, "active": 1},
+        )
+    )
+    if not faces:
+        result["faceProfileStatus"] = "NONE"
+    elif any(
+        face.get("moderationStatus") == "APPROVED" and face.get("active")
+        for face in faces
+    ):
+        result["faceProfileStatus"] = "READY"
+    elif any(face.get("moderationStatus") == "PENDING" for face in faces):
+        result["faceProfileStatus"] = "PENDING"
+    else:
+        result["faceProfileStatus"] = "ACTION_REQUIRED"
     result["admin"] = (
         {
             "id": admin["id"],
@@ -287,6 +329,25 @@ def session(
         else None
     )
     return result
+
+
+@router.patch("/profile")
+def update_profile(
+    body: ProfileBody,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict:
+    changes = {
+        key: value
+        for key, value in body.model_dump(exclude_none=True).items()
+        if key in {"displayName", "gender", "voicePreference"}
+    }
+    if "displayName" in changes:
+        changes["displayName"] = changes["displayName"].strip()
+    changes["updatedAt"] = utc_now()
+    request.app.state.db.users.update_one({"id": user["id"]}, {"$set": changes})
+    updated = request.app.state.db.users.find_one({"id": user["id"]})
+    return _safe_user(updated)
 
 
 @router.post("/logout")

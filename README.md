@@ -86,7 +86,19 @@ npm run build
 npm start
 ```
 
-The frontend uses same-origin `/api` calls. GridFS storage and browser AI need
-no external key. Real calls require LiveKit; email and automated gateways need
-their own accounts. The current browser AI is a tracked compositor, not yet a
-photorealistic generative replacement model.
+The frontend uses same-origin `/api` calls. GridFS storage, the local enhanced
+face mask and browser voice tones need no external key. Real calls require
+LiveKit; email and automated gateways need their own accounts. The local mask
+is real processed-track compositing, but it is not a photorealistic neural face
+swap. That requires a separate realtime GPU/video worker.
+
+## Realtime Media Status
+
+- **Local enhanced face mask:** implemented with MediaPipe, smoothed face-oval
+  compositing, adaptive lighting, feathered edges and safe raw-camera restore.
+- **Browser voice tone:** implemented with Web Audio/AudioWorklet and processed
+  LiveKit microphone publication. It is a modest tone effect, not cloning.
+- **Cloud AI face swap:** unavailable until a verified realtime GPU worker is
+  configured. Emergent LLM credits alone are not treated as video inference.
+- **Device guidance:** pricing and billing pages include phone recommendations
+  and an optional advisory capability check.

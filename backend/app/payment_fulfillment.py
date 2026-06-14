@@ -46,7 +46,12 @@ def fulfill_payment(
                     "status": "ACTIVE",
                     "currentPeriodStart": now,
                     "currentPeriodEnd": now
-                    + timedelta(days=plan["creditResetDays"]),
+                    + timedelta(
+                        days=plan.get(
+                            "subscriptionDurationDays",
+                            plan["creditResetDays"],
+                        )
+                    ),
                     "updatedAt": now,
                 },
                 "$setOnInsert": {

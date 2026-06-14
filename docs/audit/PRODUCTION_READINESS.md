@@ -12,8 +12,8 @@
 
 Verified on June 14, 2026:
 
-- Backend: `50 passed`.
-- Frontend: `7 passed`.
+- Backend: `54 passed`.
+- Frontend: `16 passed`.
 - TypeScript: passed.
 - Production build: passed; `47` routes generated.
 - Frontend production dependencies: `0` known vulnerabilities.
@@ -35,6 +35,9 @@ Verified on June 14, 2026:
    quality is a launch promise.
 8. Configure backups, monitoring, alerting and incident response.
 9. Run iPhone Safari, Android Chrome and weak-device acceptance tests.
+10. Validate the AudioWorklet tone and local mask on real iPhone/Android
+    hardware; automated mobile viewport checks cannot reproduce device thermal
+    policies or Safari background-media suspension.
 
 Until items 5-9 are closed, this is a production-oriented SaaS foundation,
 not a claim that the full photorealistic AI service is ready for unrestricted

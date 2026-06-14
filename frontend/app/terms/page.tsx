@@ -19,7 +19,7 @@ export default function TermsPage() {
         <section>
           <h2>Visible synthetic media</h2>
           <p>
-            AI face mode includes participant-visible disclosure. You may not
+            Face processing includes participant-visible disclosure. You may not
             attempt to remove, obscure, or misrepresent that disclosure.
           </p>
         </section>
