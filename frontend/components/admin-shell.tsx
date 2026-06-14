@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
-  BadgeDollarSign,
+  Banknote,
   Blocks,
   FileClock,
   Gauge,
@@ -24,7 +24,7 @@ import { apiFetch } from "../lib/api";
 const adminNav = [
   ["/admin/dashboard", Gauge, "Overview"],
   ["/admin/users", Users, "Users"],
-  ["/admin/billing", BadgeDollarSign, "Billing"],
+  ["/admin/billing", Banknote, "Billing"],
   ["/admin/calls", Video, "Calls & usage"],
   ["/admin/moderation", Sparkles, "Face moderation"],
   ["/admin/reports", ShieldAlert, "Abuse reports"],

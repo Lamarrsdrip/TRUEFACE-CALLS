@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CircleDollarSign, Plus, ReceiptText, Timer } from "lucide-react";
+import { Coins, Plus, ReceiptText, Timer } from "lucide-react";
 import { useApiResource } from "../hooks/use-api-resource";
 import { creditsFromMilli, formatDate } from "../lib/format";
 import {
@@ -65,7 +65,7 @@ export function CreditsClient() {
             label="Available"
             value={creditsFromMilli(wallet.data.availableMilliCredits)}
             detail="credits"
-            icon={<CircleDollarSign size={17} />}
+            icon={<Coins size={17} />}
           />
           <StatCard
             label="Included balance"

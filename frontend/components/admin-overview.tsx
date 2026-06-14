@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  BadgeDollarSign,
+  Banknote,
   Clock3,
   ShieldAlert,
   Sparkles,
@@ -57,7 +57,7 @@ export function AdminOverview() {
             <StatCard
               label="Active subscriptions"
               value={data.activeSubscriptions}
-              icon={<BadgeDollarSign size={17} />}
+              icon={<Banknote size={17} />}
             />
             <StatCard
               label="Active rooms"
@@ -67,7 +67,7 @@ export function AdminOverview() {
             <StatCard
               label="Revenue"
               value={moneyFromMinor(data.revenueMinor)}
-              icon={<BadgeDollarSign size={17} />}
+              icon={<Banknote size={17} />}
             />
           </section>
           <section className="stats-grid mt-4">
@@ -106,7 +106,7 @@ export function AdminOverview() {
             <StatCard
               label="Manual payments"
               value={data.pendingManualPayments}
-              icon={<BadgeDollarSign size={17} />}
+              icon={<Banknote size={17} />}
             />
             <StatCard
               label="System alerts"

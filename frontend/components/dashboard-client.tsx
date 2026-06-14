@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   CalendarDays,
-  CircleDollarSign,
+  Coins,
   ShieldCheck,
   Sparkles,
   Video,
@@ -97,7 +97,7 @@ export function DashboardClient() {
                   ? `${creditsFromMilli(state.wallet.reservedMilliCredits)} reserved for active calls`
                   : "Available for metered features"
               }
-              icon={<CircleDollarSign size={17} />}
+              icon={<Coins size={17} />}
             />
             <StatCard
               label="Estimated AI minutes"

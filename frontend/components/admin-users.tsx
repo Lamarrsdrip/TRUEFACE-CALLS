@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CircleDollarSign, UserRoundCog } from "lucide-react";
+import { Coins, UserRoundCog } from "lucide-react";
 import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch, jsonBody } from "../lib/api";
 import { ErrorState, LoadingState, PageHeader, StatusBadge } from "./ui";
@@ -100,7 +100,7 @@ export function AdminUsers() {
         />
       </div>
       <form className="panel admin-inline-form" onSubmit={adjust}>
-        <CircleDollarSign size={20} />
+        <Coins size={20} />
         <select name="userId" required defaultValue="">
           <option value="" disabled>
             Select user
