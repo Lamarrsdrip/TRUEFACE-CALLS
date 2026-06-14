@@ -1,15 +1,27 @@
 # Providers Needed
 
-Emergent handles frontend hosting, FastAPI hosting, MongoDB, deployment,
-environment injection, HTTPS and preview/production URLs.
+Emergent can handle:
 
-External accounts required only when activating their features:
+- frontend and FastAPI hosting
+- MongoDB
+- GridFS private files for the initial launch
+- environment secrets, HTTPS, logs and preview/production URLs
 
-- LiveKit Cloud or compatible LiveKit server.
-- Stripe, Paystack and/or Flutterwave.
-- Transactional email or SMTP.
-- Optional S3/R2 if replacing GridFS.
-- Optional RunPod, Modal, AWS, Replicate or custom GPU processing.
-- Optional monitoring and WhatsApp providers.
+Required external account for calls:
 
-Enter credentials in `/admin/providers`; do not expose them to the frontend.
+- LiveKit Cloud or a compatible LiveKit server
+
+Required for production account recovery:
+
+- Gmail App Password, custom SMTP, or Resend
+
+Optional:
+
+- Paystack and/or Flutterwave; manual bank works without a gateway
+- Emergent AI gateway, if Emergent supplies real-time face-video capability
+- RunPod, Modal, AWS, Replicate or custom GPU worker
+- monitoring and WhatsApp
+- Cloudflare R2/S3 for a later storage migration
+
+All configurable credentials belong in `/admin/providers`. GridFS and browser
+AI need no external API key.

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { creditsFromMilli, estimatedMinutes, formatDuration } from "./format";
+import {
+  creditsFromMilli,
+  estimatedMinutes,
+  formatDuration,
+  moneyFromMinor,
+} from "./format";
 
 describe("billing display helpers", () => {
   it("formats milli-credits without hiding fractional balance", () => {
@@ -12,5 +17,10 @@ describe("billing display helpers", () => {
 
   it("formats a call duration", () => {
     expect(formatDuration(3_725_000)).toBe("1h 2m");
+  });
+
+  it("formats every monetary amount as Nigerian Naira", () => {
+    expect(moneyFromMinor(1_250_000)).toContain("₦");
+    expect(moneyFromMinor(1_250_000, "USD")).toContain("₦");
   });
 });

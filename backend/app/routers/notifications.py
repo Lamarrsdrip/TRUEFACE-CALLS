@@ -10,7 +10,8 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 @router.get("")
 def notifications(request: Request, user: dict = Depends(current_user)) -> list[dict]:
-    records = request.app.state.db.notifications.find(
+    db = request.app.state.db
+    records = list(db.notifications.find(
         {
             "$or": [
                 {"userId": user["id"]},
@@ -18,8 +19,25 @@ def notifications(request: Request, user: dict = Depends(current_user)) -> list[
             ]
         },
         {"_id": 0},
-    ).sort("createdAt", -1).limit(100)
-    return json_safe(list(records))
+    ).sort("createdAt", -1).limit(100))
+    reads = {
+        item["notificationId"]: item.get("readAt")
+        for item in db.notification_reads.find(
+            {
+                "userId": user["id"],
+                "notificationId": {"$in": [item["id"] for item in records]},
+            }
+        )
+    }
+    return json_safe(
+        [
+            {
+                **item,
+                "readAt": reads.get(item["id"], item.get("readAt")),
+            }
+            for item in records
+        ]
+    )
 
 
 @router.patch("/{notification_id}/read")
@@ -28,10 +46,23 @@ def read_notification(
     request: Request,
     user: dict = Depends(current_user),
 ) -> dict:
-    result = request.app.state.db.notifications.update_one(
-        {"id": notification_id, "userId": {"$in": [user["id"], None]}},
-        {"$set": {"readAt": utc_now()}},
+    db = request.app.state.db
+    notification = db.notifications.find_one(
+        {"id": notification_id, "userId": {"$in": [user["id"], None]}}
     )
-    if not result.matched_count:
+    if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
+    now = utc_now()
+    db.notification_reads.update_one(
+        {"notificationId": notification_id, "userId": user["id"]},
+        {
+            "$set": {"readAt": now, "updatedAt": now},
+            "$setOnInsert": {
+                "notificationId": notification_id,
+                "userId": user["id"],
+                "createdAt": now,
+            },
+        },
+        upsert=True,
+    )
     return {"read": True}

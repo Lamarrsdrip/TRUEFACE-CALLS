@@ -2364,6 +2364,42 @@ textarea:focus-visible {
   gap: 18px;
 }
 
+.checkout-summary {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.checkout-summary > div {
+  display: grid;
+  gap: 5px;
+}
+
+.checkout-summary span,
+.checkout-secure,
+.provider-fallback-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.checkout-summary strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 20px;
+}
+
+.checkout-narration {
+  margin-bottom: 14px;
+}
+
+.checkout-secure {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .bank-details {
   display: grid;
   align-content: start;
@@ -2440,7 +2476,7 @@ textarea:focus-visible {
 
 .provider-layout {
   display: grid;
-  grid-template-columns: 230px minmax(0, 680px);
+  grid-template-columns: 250px minmax(0, 760px);
   gap: 18px;
 }
 
@@ -2467,6 +2503,85 @@ textarea:focus-visible {
   color: var(--primary);
   border-color: #a5a0ff;
   background: #f3f2ff;
+}
+
+.provider-heading,
+.readiness-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.provider-heading h2,
+.readiness-head h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.provider-heading p,
+.readiness-head p {
+  max-width: 620px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.provider-form .field small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.provider-fallback-note {
+  line-height: 1.5;
+}
+
+.create-call-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.2fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.readiness-card {
+  position: sticky;
+  top: 84px;
+}
+
+.readiness-list {
+  display: grid;
+  gap: 8px;
+}
+
+.readiness-list > div {
+  min-height: 62px;
+  padding: 10px 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.readiness-list > div:last-child {
+  border-bottom: 0;
+}
+
+.readiness-list span {
+  display: grid;
+  gap: 2px;
+}
+
+.readiness-list small {
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .admin-inline-form {
@@ -2944,6 +3059,8 @@ textarea:focus-visible {
   }
 
   .provider-layout,
+  .create-call-layout,
+  .checkout-summary,
   .admin-plan-grid,
   .admin-inline-form,
   .admin-setting-form,
@@ -2967,6 +3084,18 @@ textarea:focus-visible {
 
   .provider-list {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .provider-list button {
+    min-width: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+  }
+
+  .readiness-card {
+    position: static;
   }
 
   .admin-record,

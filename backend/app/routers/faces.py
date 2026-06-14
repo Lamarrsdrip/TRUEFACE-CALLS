@@ -9,6 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from gridfs import GridFS
 
 from ..entitlements import current_entitlement
+from ..errors import api_error
+from ..face_storage import purge_face_profile_data
+from ..provider_policy import apply_provider_defaults
+from ..routers.providers import provider_values
 from ..security import current_user
 from ..serializers import iso, json_safe, utc_now
 
@@ -58,7 +62,7 @@ def upload_url(
     if size <= 0 or size > 10_000_000:
         raise HTTPException(status_code=422, detail="Image must be under 10 MB")
     object_key = f"faces/{user['id']}/{uuid.uuid4()}"
-    token = request.app.state.sign_upload(object_key)
+    token = request.app.state.sign_upload(object_key, content_type)
     return {
         "objectKey": object_key,
         "url": f"/api/uploads/{object_key}?token={token}",
@@ -68,19 +72,36 @@ def upload_url(
 
 @router.put("/uploads/{object_key:path}")
 async def upload_private(object_key: str, token: str, request: Request) -> dict:
-    if not request.app.state.verify_upload(object_key, token):
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+    if not request.app.state.verify_upload(object_key, content_type, token):
         raise HTTPException(status_code=403, detail="Upload token is invalid")
     payload = await request.body()
+    allowed = (
+        {"image/jpeg", "image/png", "image/webp"}
+        if object_key.startswith("faces/")
+        else {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "application/pdf",
+        }
+        if object_key.startswith("payment-proofs/")
+        else set()
+    )
+    if content_type not in allowed or not _matches_file_signature(
+        payload, content_type
+    ):
+        raise HTTPException(status_code=422, detail="Uploaded file content is invalid")
     if len(payload) > 10_000_000:
         raise HTTPException(status_code=413, detail="Upload is too large")
     fs = GridFS(request.app.state.db, collection="uploads")
     existing = request.app.state.db.uploads.files.find_one({"filename": object_key})
     if existing:
-        fs.delete(existing["_id"])
+        raise HTTPException(status_code=409, detail="Upload has already been completed")
     fs.put(
         payload,
         filename=object_key,
-        contentType=request.headers.get("content-type", "application/octet-stream"),
+        contentType=content_type,
         metadata={"private": True, "uploadedAt": utc_now()},
     )
     return {"uploaded": True}
@@ -98,7 +119,33 @@ def private_file(
     item = fs.find_one({"filename": object_key})
     if not item:
         raise HTTPException(status_code=404, detail="Private file not found")
-    return Response(content=item.read(), media_type=item.content_type)
+    headers = {
+        "cache-control": "private, no-store",
+        "x-content-type-options": "nosniff",
+    }
+    if object_key.startswith("payment-proofs/"):
+        headers["content-disposition"] = "attachment"
+    return Response(
+        content=item.read(),
+        media_type=item.content_type,
+        headers=headers,
+    )
+
+
+def _matches_file_signature(payload: bytes, content_type: str) -> bool:
+    if content_type == "image/jpeg":
+        return payload.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return payload.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return (
+            len(payload) >= 12
+            and payload.startswith(b"RIFF")
+            and payload[8:12] == b"WEBP"
+        )
+    if content_type == "application/pdf":
+        return payload.startswith(b"%PDF-")
+    return False
 
 
 @router.post("/faces")
@@ -127,7 +174,38 @@ def create_face(
     images = []
     now = utc_now()
     profile_id = str(uuid.uuid4())
+    seen_object_keys: set[str] = set()
     for source in images_input:
+        object_key = str(source.get("objectKey", ""))
+        expected_prefix = f"faces/{user['id']}/"
+        if not object_key.startswith(expected_prefix):
+            raise HTTPException(
+                status_code=403,
+                detail="Face image is not owned by this user",
+            )
+        if object_key in seen_object_keys:
+            raise HTTPException(
+                status_code=422,
+                detail="Each face image must be a different upload",
+            )
+        stored = db.uploads.files.find_one({"filename": object_key})
+        if not stored:
+            raise HTTPException(
+                status_code=422,
+                detail="Upload every face image before creating the profile",
+            )
+        if db.face_profile_images.find_one({"objectKey": object_key}):
+            raise HTTPException(
+                status_code=409,
+                detail="A face upload cannot be reused across profiles",
+            )
+        mime_type = str(source.get("mimeType", ""))
+        if stored.get("contentType") != mime_type:
+            raise HTTPException(
+                status_code=422,
+                detail="Face image type does not match the uploaded file",
+            )
+        seen_object_keys.add(object_key)
         quality = source.get("quality") or {}
         normalized = (
             quality
@@ -139,10 +217,10 @@ def create_face(
         image = {
             "id": str(uuid.uuid4()),
             "faceProfileId": profile_id,
-            "objectKey": source["objectKey"],
+            "objectKey": object_key,
             "role": source["role"],
-            "mimeType": source["mimeType"],
-            "sizeBytes": int(source["sizeBytes"]),
+            "mimeType": mime_type,
+            "sizeBytes": int(stored.get("length", source["sizeBytes"])),
             "width": int(source["width"]),
             "height": int(source["height"]),
             "qualityScore": int(normalized["score"]),
@@ -224,6 +302,32 @@ def list_faces(request: Request, user: dict = Depends(current_user)) -> list[dic
 def activate_face(
     profile_id: str, request: Request, user: dict = Depends(current_user)
 ) -> dict:
+    ai_values = apply_provider_defaults("ai", provider_values(request, "ai"))
+    if ai_values.get("enabled", "true").lower() != "true":
+        raise api_error(
+            503,
+            "AI_PROVIDER_NOT_CONFIGURED",
+            "AI provider not configured",
+        )
+    processing_mode = ai_values.get("mode", "hybrid")
+    if processing_mode == "cloud":
+        if not ai_values.get("gatewayUrl") or not ai_values.get("universalKey"):
+            raise api_error(
+                503,
+                "EMERGENT_AI_CREDITS_UNAVAILABLE",
+                "Emergent AI credits unavailable",
+            )
+        health = request.app.state.db.provider_health.find_one(
+            {"provider": "ai", "status": "OPERATIONAL"}
+        )
+        if not health or not (health.get("details") or {}).get(
+            "realtimeFaceVideo"
+        ):
+            raise api_error(
+                503,
+                "CLOUD_FACE_PROCESSING_UNAVAILABLE",
+                "Emergent AI does not currently report real-time face-video processing capability",
+            )
     profile = request.app.state.db.face_profiles.find_one(
         {
             "id": profile_id,
@@ -236,7 +340,12 @@ def activate_face(
     )
     if not profile:
         raise HTTPException(status_code=403, detail="Face profile is not approved and active")
-    return {"faceImageUrl": _signed_download(request, profile["objectKey"])}
+    return {
+        "faceImageUrl": _signed_download(request, profile["objectKey"]),
+        "processingMode": (
+            "browser" if processing_mode in {"browser", "hybrid"} else "cloud"
+        ),
+    }
 
 
 @router.post("/faces/{profile_id}/revoke")
@@ -264,8 +373,17 @@ def face_status(
     request: Request,
     user: dict = Depends(current_user),
 ) -> dict:
+    active = bool(body.get("active"))
+    query = {"id": profile_id, "userId": user["id"], "deletedAt": None}
+    if active:
+        query.update(
+            {
+                "moderationStatus": "APPROVED",
+                "consentRevokedAt": None,
+            }
+        )
     result = request.app.state.db.face_profiles.update_one(
-        {"id": profile_id, "userId": user["id"], "deletedAt": None},
+        query,
         {"$set": {"active": bool(body.get("active")), "updatedAt": utc_now()}},
     )
     if not result.matched_count:
@@ -283,21 +401,12 @@ def delete_face(
     )
     if not profile:
         raise HTTPException(status_code=404, detail="Face profile not found")
-    images = list(db.face_profile_images.find({"faceProfileId": profile_id}))
-    try:
-        fs = GridFS(db, collection="uploads")
-        for image in images:
-            item = db.uploads.files.find_one({"filename": image["objectKey"]})
-            if item:
-                fs.delete(item["_id"])
-    except Exception:
-        pass
+    purge_face_profile_data(db, profile)
     now = utc_now()
     db.face_profiles.update_one(
         {"id": profile_id},
         {"$set": {"active": False, "deletedAt": now, "updatedAt": now}},
     )
-    db.face_profile_images.delete_many({"faceProfileId": profile_id})
     db.consent_logs.update_many(
         {"faceProfileId": profile_id, "revokedAt": None},
         {"$set": {"revokedAt": now}},

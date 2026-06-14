@@ -2,20 +2,24 @@
 
 ```mermaid
 flowchart LR
-  B["Mobile or desktop browser"] --> N["Next.js frontend"]
-  N -->|"/api"| F["FastAPI :8001"]
+  B["Phone or desktop browser"] --> N["Next.js frontend :3000"]
+  N -->|"/api same origin"| F["FastAPI backend :8001"]
   F --> M["Emergent MongoDB"]
-  M --> G["Private GridFS"]
-  F --> L["LiveKit"]
-  F --> P["Stripe / Paystack / Flutterwave"]
-  F --> E["Email provider"]
-  F --> A["Optional AI / GPU workers"]
+  M --> G["Private GridFS files"]
+  F --> L["LiveKit Cloud or server"]
+  F --> P["Manual bank / Paystack / Flutterwave"]
+  F --> E["Gmail SMTP / SMTP / Resend"]
+  B --> A["MediaPipe + Canvas browser AI"]
+  F -. future .-> C["Emergent AI or GPU worker"]
 ```
 
-MongoDB is authoritative for users, sessions, plans, subscriptions, payments,
-credit ledgers, rooms, participants, face profiles, consent, moderation,
-notifications, provider settings and audit logs.
+MongoDB stores users, sessions, plans, subscriptions, wallets, ledger entries,
+payments, rooms, participants, face metadata, consent, moderation, provider
+settings and audit logs. GridFS stores private face images and receipts.
 
-Provider credentials are AES-256-GCM encrypted with a deployment master key.
-Browser processing remains modular and can use MediaPipe/WebGL locally or a
-future cloud GPU adapter.
+Provider secrets are encrypted with AES-256-GCM. Environment variables are
+fallback values; an encrypted admin value overrides the matching fallback.
+
+The storage and AI boundaries are adapter-ready. External R2/S3 and cloud
+face inference are configuration contracts only; the active launch adapters
+are GridFS and browser processing.

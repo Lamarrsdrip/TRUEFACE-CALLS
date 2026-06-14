@@ -1,27 +1,29 @@
-# Billing and Credits
+# Billing And Credits
 
-An active subscription is the entitlement root. Trial users receive a small
-included balance but cannot buy top-ups. Credit-pack endpoints require an
-active paid plan whose `creditTopupsAllowed` flag is enabled.
+All prices and payment records use NGN minor units and display as Naira.
 
-Wallets track:
+An active trial or paid subscription is required for metered AI features.
+Only an active paid plan with top-ups enabled can purchase credit packs.
+Expired paid users cannot continue AI usage from an old purchased balance.
 
-- expiring `includedMilliCredits`
-- durable `purchasedMilliCredits`
-- included and purchased reservations
-- total available and reserved balance
+Wallets separate:
+
+- included plan credits
+- purchased credits
+- included/purchased reservations
+- available and reserved totals
 - lifetime purchased and consumed totals
-- next included-credit reset time
+- next included-credit reset date
 
-Metering is authoritative in the API. The browser requests a quote but cannot
-choose its own rate. The API reads admin-configured base rates, quality
-multipliers, participant count, and optional voice/GPU multipliers. Each
-15-second usage window has a unique key, preventing duplicate charges.
+The server calculates rates from mode, quality, participant count and admin
+settings. Clients cannot submit their own trusted price or charge amount.
+Trial reservations default to 30 seconds; paid reservations default to five
+minutes. Usage settles in bounded, idempotent windows and unused reservations
+are released or expire automatically.
 
-Subscription activation resets included credits to the selected plan grant.
-Purchased credits remain. Usage consumes reserved included credits first,
-then reserved purchased credits, then remaining included and purchased
-balances.
+Payment fulfillment uses a per-payment atomic wallet marker plus unique ledger
+keys, preventing duplicate grants during webhook or administrator retries.
 
-Credit packs and cost assumptions are versioned settings editable in
-`/admin/billing`.
+Residual limitation: browser AI can be modified to skip metering calls. Before
+financially material scale, enforce usage from trusted LiveKit telemetry or a
+cloud processing lease.

@@ -1,26 +1,24 @@
 # Face Profile System
 
-Every profile requires ownership/permission, face-use consent, and acceptance
-of the face terms. Consent records include policy versions, timestamp, hashed
-network context, and user agent.
+Every profile requires three explicit confirmations: ownership/permission,
+consent to face use, and acceptance of face terms.
 
-A profile supports plan-limited private images with roles:
+Plans limit profiles and images. Images support front, side, lighting and
+expression roles. The browser checks one clear face, resolution, sharpness,
+lighting and face coverage. A front image is mandatory and the profile gets a
+Poor/Fair/Good/Excellent readiness score.
 
-- front
-- left angle
-- right angle
-- alternate lighting
-- alternate expression
+Security controls:
 
-Each image is analyzed for resolution, exactly one detected face, sharpness,
-lighting, and face coverage before upload is accepted. A front image is
-mandatory. Profile readiness combines average image quality, angle diversity,
-and image count into Poor, Fair, Good, or Excellent.
+- uploads are private, MIME-bound, signed for 15 minutes and single-use
+- profile creation verifies the object exists and belongs to the user
+- one upload cannot be reused across profiles
+- downloads use short-lived signed URLs and `nosniff`
+- moderation approval is required before activation
+- deletion removes GridFS bytes, image metadata and active consent
+- account deletion immediately purges biometric files
 
-Objects are never public. The app uses short-lived signed S3 URLs. Deletion
-removes every object, revokes active consent, marks the profile deleted, and
-preserves only the minimum audit record.
-
-Current browser processing activates the front image. The additional images
-improve readiness and prepare the data contract for a future consented
-multi-view GPU model; they are not presented as completed model training.
+Quality analysis is a browser precheck and can be tampered with. Administrator
+moderation remains the trusted review boundary. Additional photos are not
+currently used to train a model; they prepare the profile for a future
+consented multi-view GPU adapter.

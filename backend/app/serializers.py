@@ -10,11 +10,17 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def iso(value: datetime | date | None) -> str | None:
     if value is None:
         return None
-    if isinstance(value, datetime) and value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+    if isinstance(value, datetime):
+        value = as_utc(value)
     return value.isoformat().replace("+00:00", "Z")
 
 

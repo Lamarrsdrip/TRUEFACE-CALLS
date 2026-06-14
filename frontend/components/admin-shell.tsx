@@ -50,14 +50,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
     }
     let active = true;
     void apiFetch<{
-      adminProfile?: { role: string; active: boolean } | null;
+      admin?: { role: string; permissions: string[] } | null;
     }>("/auth/session")
       .then((session) => {
-        if (!session.adminProfile?.active) {
+        if (!session.admin) {
           router.replace("/admin/login");
           return;
         }
-        if (active) setAdmin({ role: session.adminProfile.role });
+        if (active) setAdmin({ role: session.admin.role });
       })
       .catch(() => router.replace("/admin/login"))
       .finally(() => {

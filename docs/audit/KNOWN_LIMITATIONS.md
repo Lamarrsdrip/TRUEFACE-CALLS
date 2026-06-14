@@ -1,14 +1,21 @@
 # Known Limitations
 
-- Real calls require LiveKit credentials and provider acceptance testing.
-- Gateway checkout requires real provider keys and registered webhook URLs.
-- Transactional email requires a configured provider.
-- Browser AI is a consented local compositor, not yet a photorealistic GPU
-  replacement model.
-- Cloud GPU execution requires a future external worker.
-- Admin MFA is represented in the data model but TOTP enrollment/enforcement
-  is not yet complete.
-- MongoDB replica-set transactions should be enabled for the strongest
-  multi-document billing guarantees. Idempotency keys permit safe recovery.
-- GridFS is private and Emergent-native; very large deployments may later move
-  files to S3 or R2 through the existing admin provider boundary.
+- LiveKit must be configured and tested with two real devices.
+- Browser AI is a static approved-image compositor driven by landmarks. It
+  does not yet synthesize photorealistic eye, blink, mouth or expression
+  transfer.
+- The cloud AI/GPU fields are adapter configuration; no cloud inference worker
+  is wired into the media path.
+- Browser-side AI usage can be bypassed by a modified client. Trusted LiveKit
+  telemetry or cloud leases are required for strong billing enforcement.
+- Administrator TOTP enrollment/enforcement is not implemented.
+- Paystack/Flutterwave recurring mandates and automatic renewals are not
+  implemented; each approved payment grants one entitlement period.
+- Email is optional for app startup but required for real verification and
+  password-reset delivery.
+- Full account-record erasure after the seven-day closure window needs an
+  operational retention worker; biometric files are purged immediately.
+- GridFS is adequate for initial managed deployment, not high-volume media
+  archives.
+- Browser and mobile Safari/Android behavior still needs real-device
+  acceptance testing.

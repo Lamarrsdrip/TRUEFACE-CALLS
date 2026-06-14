@@ -62,10 +62,15 @@ def current_user(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Authentication required")
     payload = decode_access_token(request.app.state.settings.auth_secret, token)
     session = request.app.state.db.sessions.find_one(
-        {"id": payload["sid"], "revokedAt": None}
+        {
+            "id": payload["sid"],
+            "userId": payload["sub"],
+            "revokedAt": None,
+            "expiresAt": {"$gt": utc_now()},
+        }
     )
     user = request.app.state.db.users.find_one(
-        {"id": payload["sub"], "status": {"$ne": "DELETED"}}
+        {"id": payload["sub"], "status": "ACTIVE"}
     )
     if not session or not user:
         raise HTTPException(status_code=401, detail="Authentication required")

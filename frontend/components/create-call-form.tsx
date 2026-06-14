@@ -2,9 +2,13 @@
 
 import { useState } from "react";
 import { Check, Copy, Link2, LoaderCircle, Video } from "lucide-react";
+import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch, jsonBody } from "../lib/api";
+import type { ReadinessPayload } from "./system-readiness";
+import { SystemReadiness } from "./system-readiness";
 
 export function CreateCallForm() {
+  const readiness = useApiResource<ReadinessPayload>("/system/readiness");
   const [result, setResult] = useState<{
     inviteUrl: string;
     hostUrl: string;
@@ -84,7 +88,9 @@ export function CreateCallForm() {
   }
 
   return (
-    <form className="form-card form-grid" onSubmit={submit}>
+    <div className="create-call-layout">
+      <SystemReadiness compact />
+      <form className="form-card form-grid" onSubmit={submit}>
       {error ? <div className="notice notice-danger">{error}</div> : null}
       <div className="field">
         <label htmlFor="title">Call title</label>
@@ -146,7 +152,10 @@ export function CreateCallForm() {
           People can join without creating an account.
         </span>
       </label>
-      <button className="button button-primary" disabled={busy}>
+      <button
+        className="button button-primary"
+        disabled={busy || readiness.loading || !readiness.data?.callCreationReady}
+      >
         {busy ? (
           <LoaderCircle className="spin" size={17} />
         ) : (
@@ -154,6 +163,12 @@ export function CreateCallForm() {
         )}
         Create secure call
       </button>
-    </form>
+      {!readiness.loading && !readiness.data?.callCreationReady ? (
+        <p className="text-sm text-amber-700">
+          Call creation is locked until the required provider settings are ready.
+        </p>
+      ) : null}
+      </form>
+    </div>
   );
 }

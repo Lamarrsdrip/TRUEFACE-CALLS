@@ -1,6 +1,6 @@
 # TrueFace Calls
 
-Consent-first, mobile-first AI face controls for browser video calls.
+Consent-first, mobile-first face processing for browser video calls.
 
 This branch is the **Emergent-native** edition:
 
@@ -55,11 +55,11 @@ After deployment:
 1. Open `/admin/login`.
 2. Sign in with the bootstrap administrator.
 3. Open `/admin/providers`.
-4. Enter and test LiveKit, payments, email, storage, AI and GPU credentials.
+4. Configure LiveKit first, then manual bank, email and optional providers.
 5. Configure manual bank details if accepting reviewed transfers.
 6. Open `/admin/plans` to configure subscription prices, credits and limits.
 7. Open `/admin/settings` for branding, safety and product-policy JSON.
-8. Open `/admin/system-health` to verify the deployment.
+8. Open `/system-check` to verify database, LiveKit, storage, AI and email.
 
 Provider credentials are encrypted with AES-256-GCM before MongoDB storage.
 The browser receives only fingerprints, never saved secret values.
@@ -69,7 +69,7 @@ The browser receives only fingerprints, never saved secret values.
 Backend:
 
 ```bash
-python3 -m pip install -r backend/requirements.txt
+python3 -m pip install -r backend/requirements-dev.txt
 python3 -m pytest backend/tests -q
 cd backend
 uvicorn server:app --host 0.0.0.0 --port 8001
@@ -86,6 +86,7 @@ npm run build
 npm start
 ```
 
-The frontend uses same-origin `/api` calls. Real LiveKit calls, gateway
-payments, transactional email and cloud GPU inference remain disabled until
-their credentials are entered in the admin dashboard.
+The frontend uses same-origin `/api` calls. GridFS storage and browser AI need
+no external key. Real calls require LiveKit; email and automated gateways need
+their own accounts. The current browser AI is a tracked compositor, not yet a
+photorealistic generative replacement model.

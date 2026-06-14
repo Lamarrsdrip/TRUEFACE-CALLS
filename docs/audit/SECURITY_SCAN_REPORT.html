@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>foundation Codex Security Scan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fff;
+      --bg-elev: #fafafa;
+      --bg-muted: #f5f5f7;
+      --fg: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --code: #f3f4f6;
+      --shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f14;
+        --bg-elev: #0f141b;
+        --bg-muted: #121923;
+        --fg: #e5e7eb;
+        --muted: #9ca3af;
+        --border: #243040;
+        --accent: #60a5fa;
+        --code: #111827;
+        --shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    body.sidebar-collapsed .layout { grid-template-columns: 44px minmax(0, 1fr); }
+
+    .sidebar {
+      min-height: 100vh;
+      border-right: 1px solid var(--border);
+      background: var(--bg-muted);
+    }
+
+    .toc-inner {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 10px 8px;
+    }
+
+    .nav-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+
+    .nav-toggle {
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--fg);
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 5px;
+    }
+
+    .nav-toggle:hover { box-shadow: var(--shadow); }
+    .nav-meta { color: var(--muted); font-size: 12px; margin: 0 0 12px; padding: 0 4px; }
+
+    body.sidebar-collapsed .toc-inner {
+      display: flex;
+      align-items: center;
+      padding: 8px 6px;
+    }
+
+    body.sidebar-collapsed .nav-title span,
+    body.sidebar-collapsed .nav-meta,
+    body.sidebar-collapsed .toc { display: none; }
+
+    main { max-width: 1040px; padding: 32px 44px 80px; }
+    h1, h2, h3 { line-height: 1.2; margin-top: 1.7em; }
+    h1:first-child { margin-top: 0; }
+    h2 { border-top: 1px solid var(--border); padding-top: 1em; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { background: var(--code); border-radius: 4px; padding: 0.1em 0.3em; }
+    pre { background: var(--code); border: 1px solid var(--border); border-radius: 8px; overflow: auto; padding: 16px; }
+    pre code { background: transparent; padding: 0; }
+    table { border-collapse: collapse; width: 100%; margin: 18px 0; }
+    th, td { border: 1px solid var(--border); padding: 8px 10px; vertical-align: top; }
+    th { text-align: left; background: var(--code); }
+
+    main h3[id^="0-"] + table,
+    main h3[id^="1-"] + table,
+    main h3[id^="2-"] + table,
+    main h3[id^="3-"] + table,
+    main h3[id^="4-"] + table,
+    main h3[id^="5-"] + table,
+    main h3[id^="6-"] + table,
+    main h3[id^="7-"] + table,
+    main h3[id^="8-"] + table,
+    main h3[id^="9-"] + table {
+      margin: 10px 0 24px;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      background: var(--bg-elev);
+      box-shadow: var(--shadow);
+    }
+
+    main h3[id^="0-"] + table th,
+    main h3[id^="1-"] + table th,
+    main h3[id^="2-"] + table th,
+    main h3[id^="3-"] + table th,
+    main h3[id^="4-"] + table th,
+    main h3[id^="5-"] + table th,
+    main h3[id^="6-"] + table th,
+    main h3[id^="7-"] + table th,
+    main h3[id^="8-"] + table th,
+    main h3[id^="9-"] + table th { display: none; }
+
+    main h3[id^="0-"] + table td:first-child,
+    main h3[id^="1-"] + table td:first-child,
+    main h3[id^="2-"] + table td:first-child,
+    main h3[id^="3-"] + table td:first-child,
+    main h3[id^="4-"] + table td:first-child,
+    main h3[id^="5-"] + table td:first-child,
+    main h3[id^="6-"] + table td:first-child,
+    main h3[id^="7-"] + table td:first-child,
+    main h3[id^="8-"] + table td:first-child,
+    main h3[id^="9-"] + table td:first-child {
+      width: 170px;
+      color: var(--muted);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    main h3[id^="0-"] + table td,
+    main h3[id^="1-"] + table td,
+    main h3[id^="2-"] + table td,
+    main h3[id^="3-"] + table td,
+    main h3[id^="4-"] + table td,
+    main h3[id^="5-"] + table td,
+    main h3[id^="6-"] + table td,
+    main h3[id^="7-"] + table td,
+    main h3[id^="8-"] + table td,
+    main h3[id^="9-"] + table td { border-left: 0; border-right: 0; }
+
+    .toc { list-style: none; padding: 0; margin: 0; }
+    .toc a {
+      display: block;
+      border-radius: 6px;
+      color: var(--fg);
+      font-size: 13px;
+      line-height: 1.3;
+      padding: 4px 6px;
+      position: relative;
+      transition: background 160ms ease, color 160ms ease, padding-left 160ms ease;
+    }
+
+    .toc a:hover { background: var(--bg-elev); text-decoration: none; }
+    .toc-item { list-style: none; margin: 1px 0; }
+    .toc-item.depth-1 > a { font-weight: 700; }
+    .toc-item.depth-2 { padding-left: 14px; }
+    .toc-item.depth-3 { padding-left: 28px; }
+
+    .toc-item.active > a {
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      font-weight: 700;
+      padding-left: 10px;
+    }
+
+    .toc-item.active > a::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 4px;
+      bottom: 4px;
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+
+    @media (max-width: 900px) {
+      .layout { display: block; }
+      .sidebar { min-height: 0; border-right: 0; border-bottom: 1px solid var(--border); }
+      .toc-inner { position: static; height: auto; max-height: 45vh; }
+      main { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Table of contents">
+      <div class="toc-inner">
+        <div class="nav-title">
+          <span>Outline</span>
+          <button id="navToggle" class="nav-toggle" aria-pressed="false" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path id="navToggleIcon" d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="nav-meta">foundation Codex Security Scan</div>
+        <ul class="toc">
+          <li class="toc-item depth-1"><a href="#security-review-trueface-calls">Security Review: TrueFace Calls</a></li>
+<li class="toc-item depth-2"><a href="#scope">Scope</a></li>
+<li class="toc-item depth-3"><a href="#scan-summary">Scan Summary</a></li>
+<li class="toc-item depth-2"><a href="#threat-model">Threat Model</a></li>
+<li class="toc-item depth-3"><a href="#trust-boundaries-and-assumptions">Trust Boundaries And Assumptions</a></li>
+<li class="toc-item depth-3"><a href="#main-attack-surfaces">Main Attack Surfaces</a></li>
+<li class="toc-item depth-2"><a href="#findings">Findings</a></li>
+<li class="toc-item depth-3"><a href="#confidence-scale">Confidence Scale</a></li>
+<li class="toc-item depth-3"><a href="#1-modified-browser-clients-can-bypass-ai-usage-settlement">[1] Modified browser clients can bypass AI usage settlement</a></li>
+<li class="toc-item depth-3"><a href="#2-administrator-mfa-requirement-is-modeled-but-not-enforced">[2] Administrator MFA requirement is modeled but not enforced</a></li>
+<li class="toc-item depth-2"><a href="#reviewed-surfaces">Reviewed Surfaces</a></li>
+<li class="toc-item depth-2"><a href="#open-questions-and-follow-up">Open Questions And Follow Up</a></li>
+        </ul>
+      </div>
+    </aside>
+    <main>
+      <h1 id="security-review-trueface-calls">Security Review: TrueFace Calls</h1>
+
+<h2 id="scope">Scope</h2>
+
+<ul><li><strong>Scan mode:</strong> Repository-wide review of the deployed runtime in</li></ul>
+<p>  <code>backend/</code>, <code>frontend/</code>, root deployment configuration, and CI.</p>
+<ul><li><strong>Generated context:</strong> The threat model was generated during Phase 1 from</li></ul>
+<p>  repository code and deployment documentation.</p>
+<ul><li><strong>Artifacts reviewed:</strong> 125 runtime/configuration files, with per-file</li></ul>
+<p>  completion receipts in the work ledger and a repository coverage ledger.</p>
+<ul><li><strong>Validation:</strong> Static source-to-control tracing plus focused HTTP, GridFS,</li></ul>
+<p>  payment, provider, credit-meter, and call-diagnostic regression tests.</p>
+<ul><li><strong>Exclusions:</strong> Generated <code>.next</code> output, dependency directories, historical</li></ul>
+<p>  planning documents, and dormant non-deployed <code>apps/</code>/<code>packages/</code> output.</p>
+<p>  Emergent starts the <code>frontend/</code> and <code>backend/</code> applications only.</p>
+<ul><li><strong>Limitations:</strong> No live penetration test was performed against a deployed</li></ul>
+<p>  Emergent URL, LiveKit tenant, payment provider, or physical mobile device.</p>
+
+<h3 id="scan-summary">Scan Summary</h3>
+
+<table>
+<thead><tr>
+<th>Field</th>
+<th>Value</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Reportable findings</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Severity mix</td>
+<td>2 Medium; 0 Critical; 0 High; 0 Low</td>
+</tr>
+<tr>
+<td>Confidence mix</td>
+<td>2 High</td>
+</tr>
+<tr>
+<td>Closed during audit</td>
+<td>7 candidates</td>
+</tr>
+<tr>
+<td>Coverage</td>
+<td>125 deployed runtime/configuration files with closure receipts</td>
+</tr>
+<tr>
+<td>Validation mode</td>
+<td>Source review plus focused regression tests</td>
+</tr>
+</tbody></table>
+
+<p>Primary artifacts:</p>
+
+<ul><li>Threat model:</li></ul>
+<p>  <code>artifacts/01_context/threat_model.md</code></p>
+<ul><li>Coverage ledger:</li></ul>
+<p>  <code>artifacts/03_coverage/repository_coverage_ledger.md</code></p>
+<ul><li>Validation summary:</li></ul>
+<p>  <code>artifacts/05_findings/validation_summary.md</code></p>
+<ul><li>Attack-path summary:</li></ul>
+<p>  <code>artifacts/05_findings/attack_path_analysis_report.md</code></p>
+
+<h2 id="threat-model">Threat Model</h2>
+
+<p>TrueFace Calls is a mobile-first SaaS for authenticated and guest browser video</p>
+<p>calls, consent-controlled face profiles, device-local AI processing,</p>
+<p>subscriptions, credits, provider configuration, and administrative moderation.</p>
+<p>The deployed runtime is the Next.js application in <code>frontend/</code> and FastAPI</p>
+<p>application in <code>backend/</code>, backed by MongoDB and private GridFS.</p>
+
+<p>Principal assets are account/session integrity, biometric face images and</p>
+<p>consent records, payment and credit ledgers, signed call invitations, LiveKit</p>
+<p>credentials and tokens, administrator privileges, encrypted provider secrets,</p>
+<p>and audit history.</p>
+
+<h3 id="trust-boundaries-and-assumptions">Trust Boundaries And Assumptions</h3>
+
+<ul><li>Public browsers are untrusted. Signup, login, guest joins, signed invite</li></ul>
+<p>  parameters, uploads, payment references, reports, and JSON bodies are</p>
+<p>  attacker-controlled.</p>
+<ul><li>Authenticated users are mutually untrusted. Ownership boundaries must hold</li></ul>
+<p>  for rooms, face profiles, private files, wallets, subscriptions, and</p>
+<p>  payments.</p>
+<ul><li>Administrators are privileged operators. Login, recent-auth checks,</li></ul>
+<p>  permissions, payment approval, provider secrets, moderation, and credit</p>
+<p>  adjustment form a high-value boundary.</p>
+<ul><li>MongoDB and GridFS are trusted infrastructure, but legacy values and partial</li></ul>
+<p>  operations must be handled safely and idempotently.</p>
+<ul><li>LiveKit, Paystack, Flutterwave, email, monitoring, WhatsApp, object storage,</li></ul>
+<p>  and future cloud AI/GPU services are external trust boundaries.</p>
+<ul><li>Browser MediaPipe/Canvas processing needs no cloud AI key. Future cloud AI</li></ul>
+<p>  introduces biometric-data egress and usage cost.</p>
+
+<h3 id="main-attack-surfaces">Main Attack Surfaces</h3>
+
+<ul><li>Authentication, sessions, password reset, and administrator access.</li><li>Signed room invitations, waiting-room controls, and LiveKit token issuance.</li><li>Face uploads, ownership, consent, private download, and physical deletion.</li><li>NGN billing, manual approval, provider webhooks, and credit fulfillment.</li><li>Provider credential encryption, recent authentication, and connection tests.</li><li>Public API inputs, object authorization, redirects, errors, and rate limits.</li></ul>
+
+<p>Realistic attackers are unauthenticated internet users, malicious account</p>
+<p>holders, compromised browsers, payment fraudsters, and attackers holding a</p>
+<p>stolen administrator password.</p>
+
+<h2 id="findings">Findings</h2>
+
+<table>
+<thead><tr>
+<th>Severity</th>
+<th>Finding</th>
+<th>Confidence</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Medium</td>
+<td><a href="#1-modified-browser-clients-can-bypass-ai-usage-settlement">Modified browser clients can bypass AI usage settlement</a></td>
+<td>High</td>
+</tr>
+<tr>
+<td>Medium</td>
+<td><a href="#2-administrator-mfa-requirement-is-modeled-but-not-enforced">Administrator MFA requirement is modeled but not enforced</a></td>
+<td>High</td>
+</tr>
+</tbody></table>
+
+<h3 id="confidence-scale">Confidence Scale</h3>
+
+<table>
+<thead><tr>
+<th>Label</th>
+<th>Meaning</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>high</td>
+<td>Direct source, configuration, or runtime evidence supports the finding, with no material unresolved reachability or exploitability blocker.</td>
+</tr>
+<tr>
+<td>medium</td>
+<td>Source evidence supports a plausible issue, but runtime behavior, deployment configuration, role reachability, type constraints, or exploit reliability still need proof.</td>
+</tr>
+<tr>
+<td>low</td>
+<td>Weak or incomplete evidence; retained only for explicit follow-up.</td>
+</tr>
+</tbody></table>
+
+<h3 id="1-modified-browser-clients-can-bypass-ai-usage-settlement">[1] Modified browser clients can bypass AI usage settlement</h3>
+
+<table>
+<thead><tr>
+<th>Field</th>
+<th>Value</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Severity</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Confidence</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Confidence rationale</td>
+<td>Direct source tracing shows that only the browser knows whether local AI frames continue, while server regression tests confirm it owns rates but not processing evidence.</td>
+</tr>
+<tr>
+<td>Category</td>
+<td>Client-side enforcement of billing</td>
+</tr>
+<tr>
+<td>CWE</td>
+<td>CWE-602: Client-Side Enforcement of Server-Side Security</td>
+</tr>
+<tr>
+<td>Affected lines</td>
+<td><code>frontend/components/call-room-client.tsx:664-666</code>; <code>backend/app/routers/credits.py:190-219</code></td>
+</tr>
+</tbody></table>
+
+<h4 id="summary">Summary</h4>
+
+<p>The production client settles device-local AI usage every 15 seconds. A</p>
+<p>modified browser can keep publishing the processed track while omitting those</p>
+<p>settlement requests. Server-owned prices, reservations, and wallet checks stop</p>
+<p>rate tampering and cross-account debits, but they cannot prove that locally</p>
+<p>rendered AI frames were consumed.</p>
+
+<h4 id="validation">Validation</h4>
+
+<ul><li>Method: static source-to-control trace plus server credit-meter regression</li></ul>
+<p>  tests.</p>
+<ul><li>Confirmed: authenticated entrypoint, client-controlled settlement cadence,</li></ul>
+<p>  server-owned rates, and concrete revenue-integrity impact.</p>
+<ul><li>Remaining uncertainty: no trusted LiveKit telemetry or cloud lease exists in</li></ul>
+<p>  the checked-out runtime.</p>
+
+<h4 id="dataflow">Dataflow</h4>
+
+<p>Browser AI activation -&gt; <code>setInterval(settleAiWindow, 15000)</code> -&gt; credit</p>
+<p>settlement API -&gt; server reservation ledger -&gt; user&#x27;s wallet. A modified client</p>
+<p>removes the interval/API step while retaining local rendering and track</p>
+<p>publication.</p>
+
+<h4 id="reachability">Reachability</h4>
+
+<p>An ordinary authenticated subscriber with a valid room and face profile can</p>
+<p>modify browser code or suppress API calls remotely. The impact is limited to</p>
+<p>underpaying for that account&#x27;s own local AI usage; the path does not create</p>
+<p>credits, access another wallet, or expose biometric data.</p>
+
+<h4 id="severity">Severity</h4>
+
+<p>Final severity is <strong>Medium</strong>. Billing integrity can be materially affected at</p>
+<p>scale, but exploitation requires a technically capable authenticated user and</p>
+<p>has single-account impact. Evidence that a trusted server-side media meter can</p>
+<p>reliably correlate each published AI track with settled time would lower or</p>
+<p>close the finding.</p>
+
+<h4 id="remediation">Remediation</h4>
+
+<ul><li>Issue short-lived, server-observed AI media leases.</li><li>Correlate LiveKit participant/track telemetry with active reservations.</li><li>Stop or unpublish AI tracks when a lease expires.</li><li>Add reconciliation alerts for AI-active metadata without matching settled</li></ul>
+<p>  usage.</p>
+<ul><li>Keep cloud GPU processing server-authorized and server-metered when added.</li></ul>
+
+<h3 id="2-administrator-mfa-requirement-is-modeled-but-not-enforced">[2] Administrator MFA requirement is modeled but not enforced</h3>
+
+<table>
+<thead><tr>
+<th>Field</th>
+<th>Value</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Severity</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Confidence</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Confidence rationale</td>
+<td>The bootstrap record sets <code>mfaRequired</code>, while direct authentication tracing proves the admin login creates a full session after password verification alone.</td>
+</tr>
+<tr>
+<td>Category</td>
+<td>Missing multifactor authentication enforcement</td>
+</tr>
+<tr>
+<td>CWE</td>
+<td>CWE-308: Use of Single-factor Authentication</td>
+</tr>
+<tr>
+<td>Affected lines</td>
+<td><code>backend/app/seed.py:271-280</code>; <code>backend/app/routers/auth.py:246-267</code></td>
+</tr>
+</tbody></table>
+
+<h4 id="summary">Summary</h4>
+
+<p>Administrator records declare that MFA is required, but the admin login route</p>
+<p>does not enroll, challenge, or verify a second factor. A stolen valid</p>
+<p>administrator password therefore starts a fully privileged session.</p>
+
+<h4 id="validation">Validation</h4>
+
+<ul><li>Method: authentication code trace and administrator response inspection.</li><li>Confirmed: password-only login, active-admin lookup, immediate session</li></ul>
+<p>  creation, and returned MFA metadata without enforcement.</p>
+<ul><li>Remaining uncertainty: an external identity-aware proxy could add MFA, but no</li></ul>
+<p>  such deployment control exists in this repository.</p>
+
+<h4 id="dataflow">Dataflow</h4>
+
+<p>Attacker-supplied admin email/password -&gt; password verification -&gt; active</p>
+<p><code>admin_users</code> lookup -&gt; <code>_start_session()</code> -&gt; access to privileged routes.</p>
+<p><code>mfaRequired</code> and <code>mfaEnabled</code> are returned only as metadata.</p>
+
+<h4 id="reachability">Reachability</h4>
+
+<p>The endpoint is remotely reachable, but the attacker first needs a valid</p>
+<p>administrator password. Existing Argon2 hashing, rate limits, HttpOnly cookies,</p>
+<p>CSRF controls, permissions, and recent-auth checks reduce likelihood and some</p>
+<p>post-login abuse. They do not provide an independent factor.</p>
+
+<h4 id="severity">Severity</h4>
+
+<p>Final severity is <strong>Medium</strong>. A successful path can reach sensitive payment,</p>
+<p>provider, moderation, and settings operations, but it depends on prior admin</p>
+<p>credential compromise. Proof of an unauthenticated bypass or broadly reusable</p>
+<p>default admin credential would raise severity; deployment-level enforced MFA</p>
+<p>would lower or close it.</p>
+
+<h4 id="remediation">Remediation</h4>
+
+<ul><li>Implement TOTP or WebAuthn enrollment and challenge.</li><li>Do not create a privileged session while required MFA is incomplete.</li><li>Add recovery codes, revocation, replay prevention, and step-up tests.</li><li>Require MFA challenge for payment approval, provider credential changes, and</li></ul>
+<p>  manual credit adjustment.</p>
+
+<h2 id="reviewed-surfaces">Reviewed Surfaces</h2>
+
+<table>
+<thead><tr>
+<th>Surface</th>
+<th>Risk Area</th>
+<th>Outcome</th>
+<th>Notes</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Browser AI and credit meter</td>
+<td>Client trust / billing</td>
+<td>Reported</td>
+<td>Local processing cannot yet be independently observed by the server.</td>
+</tr>
+<tr>
+<td>Admin authentication</td>
+<td>Identity / privilege</td>
+<td>Reported</td>
+<td>MFA flags exist but no challenge is enforced.</td>
+</tr>
+<tr>
+<td>Face upload/profile creation</td>
+<td>IDOR / private biometric data</td>
+<td>Rejected</td>
+<td>Ownership prefix, GridFS existence, MIME and non-reuse checks added and tested.</td>
+</tr>
+<tr>
+<td>Face/account deletion</td>
+<td>Privacy deletion</td>
+<td>Rejected</td>
+<td>Shared helper now physically purges GridFS bytes and metadata.</td>
+</tr>
+<tr>
+<td>Manual bank approval and provider fulfillment</td>
+<td>Duplicate value / fake success</td>
+<td>Rejected</td>
+<td>Atomic fulfillment marker and idempotent ledger added and tested.</td>
+</tr>
+<tr>
+<td>Paystack/Flutterwave webhooks</td>
+<td>Forgery / state corruption</td>
+<td>Rejected</td>
+<td>Missing secrets fail closed; signatures, terminal events, exact NGN value, and idempotency enforced.</td>
+</tr>
+<tr>
+<td>Provider settings</td>
+<td>Secret leakage / control bypass</td>
+<td>Rejected</td>
+<td>Generic provider namespace blocked; encrypted provider route retains recent-auth and RBAC.</td>
+</tr>
+<tr>
+<td>Production configuration</td>
+<td>Default secrets</td>
+<td>Rejected</td>
+<td>Non-local startup refuses default or weak security keys.</td>
+</tr>
+<tr>
+<td>Call join and expiration</td>
+<td>Availability / error disclosure</td>
+<td>Rejected</td>
+<td>UTC normalization and coded errors replace the generic 500.</td>
+</tr>
+<tr>
+<td>Sessions, CSRF, redirects, API validation</td>
+<td>Web security</td>
+<td>No issue found</td>
+<td>Argon2, HttpOnly cookies, CSRF, bounded redirects, validation, and request IDs reviewed.</td>
+</tr>
+<tr>
+<td>Storage and private downloads</td>
+<td>Object access / upload safety</td>
+<td>No issue found</td>
+<td>GridFS objects are private and downloads/uploads use scoped one-time signed tokens.</td>
+</tr>
+<tr>
+<td>Admin search and moderation</td>
+<td>Injection / object state</td>
+<td>No issue found</td>
+<td>Regex input is escaped/bounded and state transitions validate target records.</td>
+</tr>
+</tbody></table>
+
+<h2 id="open-questions-and-follow-up">Open Questions And Follow Up</h2>
+
+<ul><li>Implement and review trusted AI usage leases around</li></ul>
+<p>  <code>frontend/components/call-room-client.tsx</code> and</p>
+<p>  <code>backend/app/routers/credits.py</code>.</p>
+<ul><li>Implement and review administrator TOTP/WebAuthn enforcement around</li></ul>
+<p>  <code>backend/app/routers/auth.py</code>.</p>
+<ul><li>Run a deployed two-device LiveKit test covering guest join, waiting room,</li></ul>
+<p>  reconnect, AI toggle, and exhausted credits.</p>
+<ul><li>Run Paystack and Flutterwave sandbox callback tests with real provider</li></ul>
+<p>  signatures before enabling either provider.</p>
+<ul><li>Run iPhone Safari and Android Chrome acceptance tests against the Emergent</li></ul>
+<p>  HTTPS preview.</p>
+
+    </main>
+  </div>
+  <script>
+    const toggle = document.getElementById('navToggle');
+    const icon = document.getElementById('navToggleIcon');
+    const collapsedKey = 'codex-security-report:sidebar-collapsed';
+
+    function setCollapsed(collapsed) {
+      document.body.classList.toggle('sidebar-collapsed', collapsed);
+      if (toggle) {
+        toggle.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+        toggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        toggle.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      }
+      if (icon) icon.setAttribute('d', collapsed ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6');
+      try { localStorage.setItem(collapsedKey, collapsed ? '1' : '0'); } catch {}
+    }
+
+    try { setCollapsed(localStorage.getItem(collapsedKey) === '1'); } catch {}
+    if (toggle) toggle.addEventListener('click', () => setCollapsed(!document.body.classList.contains('sidebar-collapsed')));
+
+    const tocLinks = Array.from(document.querySelectorAll('.toc a'));
+    const sections = tocLinks.map((link) => {
+      const id = decodeURIComponent(link.getAttribute('href').slice(1));
+      return [link, document.getElementById(id)];
+    }).filter((pair) => pair[1]);
+
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (!visible) return;
+      tocLinks.forEach((link) => link.parentElement.classList.remove('active'));
+      const active = tocLinks.find((link) => link.getAttribute('href') === '#' + visible.target.id);
+      if (active) active.parentElement.classList.add('active');
+    }, { rootMargin: '-10% 0px -75% 0px', threshold: [0, 1] });
+
+    sections.forEach(([, section]) => observer.observe(section));
+  </script>
+</body>
+</html>

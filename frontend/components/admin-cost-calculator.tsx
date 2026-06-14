@@ -29,17 +29,30 @@ interface CreditPack {
 }
 
 const defaults = {
-  livekitPerParticipantMinute: 0.004,
-  bandwidthPerGb: 0.09,
+  livekitPerParticipantMinute: 7,
+  bandwidthPerGb: 150,
   gbPerHdMinute: 0.018,
-  browserAiPerMinute: 0.001,
-  gpuAiPerMinute: 0.035,
-  hostingMonthly: 150,
-  databaseStorageMonthly: 90,
+  browserAiPerMinute: 1,
+  gpuAiPerMinute: 60,
+  hostingMonthly: 250000,
+  databaseStorageMonthly: 100000,
   expectedSubscribers: 500,
-  paymentPercent: 2.9,
-  paymentFixed: 0.3,
+  paymentPercent: 1.5,
+  paymentFixed: 100,
   targetMarginPercent: 70,
+};
+
+const usageDefaults = {
+  baseCallMilliPerMinute: 500,
+  aiFaceMilliPerMinute: 2000,
+  voiceEffectMilliPerMinute: 2500,
+  cloudGpuMilliPerMinute: 5000,
+  lowMultiplier: 1,
+  standardMultiplier: 1.25,
+  hdMultiplier: 2,
+  participantMultiplierStep: 0.15,
+  paidReservationSeconds: 300,
+  trialReservationSeconds: 30,
 };
 
 export function AdminCostCalculator() {
@@ -48,6 +61,7 @@ export function AdminCostCalculator() {
   );
   const plans = useApiResource<Plan[]>("/admin/plans");
   const [model, setModel] = useState(defaults);
+  const [usageRates, setUsageRates] = useState(usageDefaults);
   const [packs, setPacks] = useState(
     JSON.stringify(
       {
@@ -56,8 +70,8 @@ export function AdminCostCalculator() {
             key: "starter",
             name: "Starter credits",
             creditsMilli: 25_000,
-            amountMinor: 500,
-            currency: "USD",
+            amountMinor: 250000,
+            currency: "NGN",
           },
         ],
       },
@@ -72,6 +86,9 @@ export function AdminCostCalculator() {
     const creditPacks = settings.data?.find(
       (item) => item.key === "credit-packs",
     );
+    const configuredUsage = settings.data?.find(
+      (item) => item.key === "usage-rates",
+    );
     if (cost?.publicValue && typeof cost.publicValue === "object") {
       setModel((current) => ({
         ...current,
@@ -80,6 +97,15 @@ export function AdminCostCalculator() {
     }
     if (creditPacks?.publicValue) {
       setPacks(JSON.stringify(creditPacks.publicValue, null, 2));
+    }
+    if (
+      configuredUsage?.publicValue &&
+      typeof configuredUsage.publicValue === "object"
+    ) {
+      setUsageRates((current) => ({
+        ...current,
+        ...(configuredUsage.publicValue as Partial<typeof usageDefaults>),
+      }));
     }
   }, [settings.data]);
 
@@ -148,6 +174,10 @@ export function AdminCostCalculator() {
         method: "PUT",
         ...jsonBody({ value: parsedPacks }),
       }),
+      apiFetch("/admin/settings/billing/usage-rates", {
+        method: "PUT",
+        ...jsonBody({ value: usageRates }),
+      }),
     ]);
     setMessage("Cost assumptions and credit packs saved with an audit record.");
     await settings.refresh();
@@ -188,22 +218,50 @@ export function AdminCostCalculator() {
           </label>
         ))}
       </div>
+      <div className="admin-economics-head usage-rate-heading">
+        <div>
+          <h2>Credit usage engine</h2>
+          <p>
+            Server-enforced milli-credit rates. One credit equals 1,000
+            milli-credits; clients cannot override these values.
+          </p>
+        </div>
+      </div>
+      <div className="cost-input-grid">
+        {Object.entries(usageRates).map(([key, value]) => (
+          <label className="field" key={key}>
+            <span>{humanize(key)}</span>
+            <input
+              type="number"
+              min="0"
+              step={key.includes("Multiplier") ? "0.01" : "1"}
+              value={value}
+              onChange={(event) =>
+                setUsageRates((current) => ({
+                  ...current,
+                  [key]: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+        ))}
+      </div>
       <div className="cost-output-grid">
         <div>
           <span>Standard AI cost/min</span>
-          <strong>${economics.standardMinute.toFixed(4)}</strong>
+          <strong>{nairaMajor(economics.standardMinute)}</strong>
         </div>
         <div>
           <span>HD AI cost/min</span>
-          <strong>${economics.hdMinute.toFixed(4)}</strong>
+          <strong>{nairaMajor(economics.hdMinute)}</strong>
         </div>
         <div>
           <span>Cloud GPU cost/min</span>
-          <strong>${economics.gpuMinute.toFixed(4)}</strong>
+          <strong>{nairaMajor(economics.gpuMinute)}</strong>
         </div>
         <div>
           <span>Fixed cost/subscriber</span>
-          <strong>${economics.allocatedFixed.toFixed(2)}</strong>
+          <strong>{nairaMajor(economics.allocatedFixed)}</strong>
         </div>
       </div>
       <div className="admin-table-wrap">
@@ -239,7 +297,7 @@ export function AdminCostCalculator() {
                   <td>
                     {moneyFromMinor(plan.priceMonthlyMinor, plan.currency)}
                   </td>
-                  <td>${variableCost.toFixed(2)}</td>
+                  <td>{nairaMajor(variableCost)}</td>
                   <td>{margin.toFixed(1)}%</td>
                 </tr>
               );
@@ -263,7 +321,7 @@ export function AdminCostCalculator() {
               <tr key={pack.key}>
                 <td>{pack.name}</td>
                 <td>{moneyFromMinor(pack.amountMinor, pack.currency)}</td>
-                <td>${pack.estimatedCost.toFixed(2)}</td>
+                <td>{nairaMajor(pack.estimatedCost)}</td>
                 <td>
                   {Number.isFinite(pack.suggestedMinimum)
                     ? moneyFromMinor(
@@ -294,4 +352,8 @@ function humanize(value: string) {
   return value
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (character) => character.toUpperCase());
+}
+
+function nairaMajor(value: number) {
+  return moneyFromMinor(Math.round(value * 100));
 }

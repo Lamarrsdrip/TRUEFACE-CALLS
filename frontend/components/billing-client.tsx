@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ExternalLink } from "lucide-react";
 import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch, jsonBody } from "../lib/api";
@@ -41,10 +41,20 @@ export function BillingClient() {
     "/billing/subscription",
   );
   const payments = useApiResource<Payment[]>("/billing/payments");
+  const methods = useApiResource<{
+    methods: Array<{ key: "bank" | "paystack" | "flutterwave"; label: string }>;
+  }>("/billing/payment-methods");
   const [provider, setProvider] = useState<
-    "stripe" | "paystack" | "flutterwave" | "bank"
-  >("stripe");
+    "paystack" | "flutterwave" | "bank"
+  >("bank");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const available = methods.data?.methods ?? [];
+    if (available.length && !available.some((item) => item.key === provider)) {
+      setProvider(available[0]!.key);
+    }
+  }, [methods.data, provider]);
 
   async function choose(planId: string) {
     setError(null);
@@ -69,7 +79,7 @@ export function BillingClient() {
     <>
       <PageHeader
         title="Subscription and billing"
-        description="Provider-confirmed webhooks keep your plan and payment records synchronized."
+        description="Subscribe in Nigerian Naira. Bank transfers activate only after an administrator confirms payment."
         actions={
           <select
             aria-label="Payment provider"
@@ -77,18 +87,23 @@ export function BillingClient() {
             value={provider}
             onChange={(event) =>
               setProvider(
-                event.target.value as "stripe" | "paystack" | "flutterwave",
+                event.target.value as "paystack" | "flutterwave" | "bank",
               )
             }
           >
-            <option value="stripe">Stripe</option>
-            <option value="paystack">Paystack</option>
-            <option value="flutterwave">Flutterwave</option>
-            <option value="bank">Bank transfer</option>
+            {methods.data?.methods.map((method) => (
+              <option value={method.key} key={method.key}>
+                {method.label}
+                {method.key === "bank" ? " (recommended)" : ""}
+              </option>
+            ))}
           </select>
         }
       />
       {error ? <ErrorState message={error} /> : null}
+      {!methods.loading && methods.data?.methods.length === 0 ? (
+        <ErrorState message="No payment method is configured. Ask an administrator to enable bank transfer, Paystack, or Flutterwave." />
+      ) : null}
       {plans.loading || subscription.loading ? (
         <LoadingState label="Loading billing" />
       ) : null}
@@ -146,9 +161,9 @@ export function BillingClient() {
               </strong>
               <StatusBadge
                 tone={
-                  payment.status === "SUCCEEDED"
+                  ["SUCCEEDED", "APPROVED"].includes(payment.status)
                     ? "success"
-                    : payment.status === "FAILED"
+                    : ["FAILED", "REJECTED", "EXPIRED"].includes(payment.status)
                       ? "danger"
                       : "warning"
                 }

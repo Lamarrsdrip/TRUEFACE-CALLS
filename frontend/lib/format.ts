@@ -27,9 +27,9 @@ export function formatDate(value: string | Date): string {
   }).format(new Date(value));
 }
 
-export function moneyFromMinor(value: number, currency = "USD"): string {
-  return new Intl.NumberFormat("en", {
+export function moneyFromMinor(value: number, _currency = "NGN"): string {
+  return new Intl.NumberFormat("en-NG", {
     style: "currency",
-    currency,
+    currency: "NGN",
   }).format(value / 100);
 }

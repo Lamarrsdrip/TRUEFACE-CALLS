@@ -29,7 +29,7 @@ DEFAULT_PLANS = [
         "voiceEffects": False,
         "cloudGpu": False,
         "priceMonthlyMinor": 0,
-        "currency": "USD",
+        "currency": "NGN",
         "sortOrder": 0,
         "enabled": True,
     },
@@ -50,8 +50,8 @@ DEFAULT_PLANS = [
         "creditResetDays": 30,
         "voiceEffects": False,
         "cloudGpu": False,
-        "priceMonthlyMinor": 1900,
-        "currency": "USD",
+        "priceMonthlyMinor": 990_000,
+        "currency": "NGN",
         "sortOrder": 10,
         "enabled": True,
     },
@@ -72,8 +72,8 @@ DEFAULT_PLANS = [
         "creditResetDays": 30,
         "voiceEffects": True,
         "cloudGpu": True,
-        "priceMonthlyMinor": 4900,
-        "currency": "USD",
+        "priceMonthlyMinor": 2_490_000,
+        "currency": "NGN",
         "sortOrder": 20,
         "enabled": True,
     },
@@ -94,17 +94,35 @@ DEFAULT_PLANS = [
         "creditResetDays": 30,
         "voiceEffects": True,
         "cloudGpu": True,
-        "priceMonthlyMinor": 14900,
-        "currency": "USD",
+        "priceMonthlyMinor": 7_490_000,
+        "currency": "NGN",
         "sortOrder": 30,
         "enabled": True,
     },
 ]
 
 DEFAULT_CREDIT_PACKS = [
-    {"key": "starter", "creditsMilli": 50000, "priceMinor": 1000, "currency": "USD"},
-    {"key": "growth", "creditsMilli": 250000, "priceMinor": 4500, "currency": "USD"},
-    {"key": "scale", "creditsMilli": 1000000, "priceMinor": 16000, "currency": "USD"},
+    {
+        "key": "starter",
+        "name": "Starter credits",
+        "creditsMilli": 50_000,
+        "priceMinor": 250_000,
+        "currency": "NGN",
+    },
+    {
+        "key": "growth",
+        "name": "Growth credits",
+        "creditsMilli": 250_000,
+        "priceMinor": 1_000_000,
+        "currency": "NGN",
+    },
+    {
+        "key": "scale",
+        "name": "Scale credits",
+        "creditsMilli": 1_000_000,
+        "priceMinor": 3_500_000,
+        "currency": "NGN",
+    },
 ]
 
 
@@ -113,17 +131,22 @@ def ensure_indexes(db: Database) -> None:
     db.sessions.create_index("refreshTokenHash", unique=True)
     db.auth_tokens.create_index("tokenHash", unique=True)
     db.plans.create_index("key", unique=True)
+    db.subscriptions.create_index("id", unique=True)
     db.call_rooms.create_index("slug", unique=True)
     db.credit_wallets.create_index("userId", unique=True)
     db.credit_transactions.create_index("idempotencyKey", unique=True)
     db.usage_minutes.create_index("meteringWindow", unique=True)
     db.payments.create_index("idempotencyKey", unique=True)
+    db.payments.create_index("paymentReference", unique=True, sparse=True)
     db.webhook_events.create_index(
         [("provider", 1), ("externalId", 1)], unique=True, sparse=True
     )
     db.app_settings.create_index([("namespace", 1), ("key", 1)], unique=True)
     db.provider_health.create_index("provider", unique=True)
     db.blocked_users.create_index([("blockerId", 1), ("blockedId", 1)], unique=True)
+    db.notification_reads.create_index(
+        [("notificationId", 1), ("userId", 1)], unique=True
+    )
     db.rate_limits.create_index("expiresAt", expireAfterSeconds=0)
 
 
@@ -135,21 +158,33 @@ def seed_database(
     ensure_indexes(db)
     now = utc_now()
     for plan in DEFAULT_PLANS:
-        db.plans.update_one(
-            {"key": plan["key"]},
-            {
-                "$set": {**plan, "updatedAt": now},
-                "$setOnInsert": {
+        existing = db.plans.find_one({"key": plan["key"]})
+        if not existing:
+            db.plans.insert_one(
+                {
+                    **plan,
                     "id": str(uuid.uuid4()),
                     "createdAt": now,
+                    "updatedAt": now,
+                }
+            )
+        elif existing.get("currency") != "NGN":
+            db.plans.update_one(
+                {"id": existing["id"]},
+                {
+                    "$set": {
+                        "currency": "NGN",
+                        "priceMonthlyMinor": plan["priceMonthlyMinor"],
+                        "updatedAt": now,
+                    }
                 },
-            },
-            upsert=True,
-        )
-    db.app_settings.update_one(
-        {"namespace": "billing", "key": "credit-packs"},
-        {
-            "$setOnInsert": {
+            )
+    credit_setting = db.app_settings.find_one(
+        {"namespace": "billing", "key": "credit-packs"}
+    )
+    if not credit_setting:
+        db.app_settings.insert_one(
+            {
                 "id": str(uuid.uuid4()),
                 "namespace": "billing",
                 "key": "credit-packs",
@@ -158,9 +193,29 @@ def seed_database(
                 "createdAt": now,
                 "updatedAt": now,
             }
-        },
-        upsert=True,
-    )
+        )
+    else:
+        packs = credit_setting.get("publicValue", {}).get("packs", [])
+        defaults = {pack["key"]: pack for pack in DEFAULT_CREDIT_PACKS}
+        migrated = []
+        changed = False
+        for pack in packs:
+            if pack.get("currency") == "NGN":
+                migrated.append(pack)
+                continue
+            default = defaults.get(pack.get("key"))
+            migrated.append(default or {**pack, "currency": "NGN"})
+            changed = True
+        if changed:
+            db.app_settings.update_one(
+                {"_id": credit_setting["_id"]},
+                {
+                    "$set": {
+                        "publicValue.packs": migrated,
+                        "updatedAt": now,
+                    }
+                },
+            )
     if not admin_email or not admin_password:
         return
     email = admin_email.strip().lower()

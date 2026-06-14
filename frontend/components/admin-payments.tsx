@@ -15,6 +15,11 @@ interface PaymentRecord {
   amountMinor: number;
   currency: string;
   createdAt: string;
+  expiresAt?: string;
+  paymentReference?: string;
+  transferReference?: string;
+  proofObjectKey?: string;
+  adminNotes?: string;
   user: { email: string; displayName: string };
   metadata: { proofObjectKey?: string; transferReference?: string } | null;
 }
@@ -22,17 +27,27 @@ interface PaymentRecord {
 export function AdminPayments() {
   const payments = useApiResource<PaymentRecord[]>("/admin/payments");
   const [message, setMessage] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   async function decide(id: string, decision: "APPROVE" | "REJECT") {
-    await apiFetch(`/admin/payments/${id}/decision`, {
-      method: "POST",
-      ...jsonBody({
-        decision,
-        reason: `Manual transfer ${decision.toLowerCase()}`,
-      }),
-    });
-    setMessage(`Manual payment ${decision.toLowerCase()}d and audited.`);
-    await payments.refresh();
+    setBusyId(id);
+    try {
+      await apiFetch(`/admin/payments/${id}/decision`, {
+        method: "POST",
+        ...jsonBody({
+          decision,
+          reason:
+            notes[id]?.trim() || `Manual transfer ${decision.toLowerCase()}`,
+        }),
+      });
+      setMessage(`Manual payment ${decision.toLowerCase()}d and audited.`);
+      await payments.refresh();
+    } catch (value) {
+      setMessage(value instanceof Error ? value.message : "Review failed.");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function viewProof(id: string) {
@@ -68,6 +83,9 @@ export function AdminPayments() {
                 {payment.metadata?.transferReference
                   ? ` · ref ${payment.metadata.transferReference}`
                   : ""}
+                {payment.paymentReference
+                  ? ` · code ${payment.paymentReference}`
+                  : ""}
               </span>
             </div>
             <strong>
@@ -75,18 +93,30 @@ export function AdminPayments() {
             </strong>
             <StatusBadge
               tone={
-                payment.status === "SUCCEEDED"
+                ["SUCCEEDED", "APPROVED"].includes(payment.status)
                   ? "success"
-                  : payment.status === "FAILED"
+                  : ["FAILED", "REJECTED", "EXPIRED"].includes(payment.status)
                     ? "danger"
                     : "warning"
               }
             >
               {payment.status.toLowerCase()}
             </StatusBadge>
-            {payment.provider === "MANUAL" && payment.status === "PENDING" ? (
+            {payment.provider === "MANUAL" &&
+            ["PENDING", "EXPIRED"].includes(payment.status) ? (
               <div className="admin-actions">
-                {payment.metadata?.proofObjectKey ? (
+                <input
+                  value={notes[payment.id] ?? ""}
+                  onChange={(event) =>
+                    setNotes((current) => ({
+                      ...current,
+                      [payment.id]: event.target.value,
+                    }))
+                  }
+                  placeholder="Review notes (optional)"
+                />
+                {(payment.proofObjectKey ||
+                  payment.metadata?.proofObjectKey) ? (
                   <button
                     className="button button-secondary button-sm"
                     onClick={() => void viewProof(payment.id)}
@@ -96,12 +126,14 @@ export function AdminPayments() {
                 ) : null}
                 <button
                   className="button button-primary button-sm"
+                  disabled={busyId === payment.id}
                   onClick={() => void decide(payment.id, "APPROVE")}
                 >
                   Approve
                 </button>
                 <button
                   className="button button-danger button-sm"
+                  disabled={busyId === payment.id}
                   onClick={() => void decide(payment.id, "REJECT")}
                 >
                   Reject

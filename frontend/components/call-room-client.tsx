@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, jsonBody } from "../lib/api";
+import { ApiError, apiFetch, jsonBody } from "../lib/api";
 import { BrowserFaceSession } from "../lib/browser-face-session";
 import {
   getJoinButtonLabel,
@@ -89,6 +89,7 @@ export function CallRoomClient({ slug }: { slug: string }) {
   const [waiting, setWaiting] = useState(false);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [connectionFailure, setConnectionFailure] = useState<string | null>(null);
 
   useEffect(() => {
     if (!invite) {
@@ -213,7 +214,10 @@ export function CallRoomClient({ slug }: { slug: string }) {
           }),
         );
         return;
-      } catch {
+      } catch (value) {
+        if (value instanceof ApiError && value.status !== 403 && value.status !== 409) {
+          throw value;
+        }
         await delay(2_500);
       }
     }
@@ -234,7 +238,10 @@ export function CallRoomClient({ slug }: { slug: string }) {
           }),
         );
         return;
-      } catch {
+      } catch (value) {
+        if (value instanceof ApiError && value.status !== 403 && value.status !== 409) {
+          throw value;
+        }
         await delay(2_500);
       }
     }
@@ -266,6 +273,19 @@ export function CallRoomClient({ slug }: { slug: string }) {
     );
   }
 
+  if (connectionFailure && room) {
+    return (
+      <div className="call-loading">
+        <ShieldCheck size={30} />
+        <h1>Call connection failed</h1>
+        <p>{connectionFailure}</p>
+        <button className="button button-secondary" onClick={() => router.push("/calls")}>
+          Return to calls
+        </button>
+      </div>
+    );
+  }
+
   if (credentials && room) {
     previewStreamRef.current?.getTracks().forEach((track) => track.stop());
     return (
@@ -276,6 +296,13 @@ export function CallRoomClient({ slug }: { slug: string }) {
         audio={microphoneOn}
         video={cameraOn}
         className="call-root"
+        onError={(value) =>
+          setConnectionFailure(
+            value instanceof Error
+              ? `LiveKit connection failed: ${value.message}`
+              : "LiveKit connection failed.",
+          )
+        }
         onDisconnected={() => router.push("/calls")}
       >
         <RoomExperience roomInfo={room} />
@@ -417,6 +444,7 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   const [faces, setFaces] = useState<FaceProfile[]>([]);
   const [selectedFace, setSelectedFace] = useState("");
   const [wallet, setWallet] = useState(0);
+  const [accountAiAvailable, setAccountAiAvailable] = useState(false);
   const [quality, setQuality] = useState<"low" | "standard" | "hd">(
     typeof window !== "undefined" && window.innerWidth < 700
       ? "low"
@@ -432,24 +460,34 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   const rawTrack = useRef<LocalVideoTrack | null>(null);
   const processedTrack = useRef<LocalVideoTrack | null>(null);
   const meter = useRef({
-    reserved: 0,
-    charged: 0,
+    reservationId: "",
+    remaining: 0,
+    rate: 0,
     interval: 0 as ReturnType<typeof setInterval> | number,
     window: 0,
+    settling: false,
   });
 
   useEffect(() => {
-    void Promise.all([
-      apiFetch<FaceProfile[]>("/faces"),
-      apiFetch<{ availableMilliCredits: number }>("/credits/wallet"),
-    ]).then(([profiles, creditWallet]) => {
-      const approved = profiles.filter(
-        (profile) => profile.moderationStatus === "APPROVED",
-      );
-      setFaces(approved);
-      setSelectedFace(approved[0]?.id ?? "");
-      setWallet(creditWallet.availableMilliCredits);
-    });
+    void apiFetch("/auth/session")
+      .then(() =>
+        Promise.all([
+          apiFetch<FaceProfile[]>("/faces"),
+          apiFetch<{ availableMilliCredits: number }>("/credits/wallet"),
+        ]),
+      )
+      .then(([profiles, creditWallet]) => {
+        const approved = profiles.filter(
+          (profile) => profile.moderationStatus === "APPROVED",
+        );
+        setFaces(approved);
+        setSelectedFace(approved[0]?.id ?? "");
+        setWallet(creditWallet.availableMilliCredits);
+        setAccountAiAvailable(true);
+      })
+      .catch(() => {
+        setAccountAiAvailable(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -487,7 +525,14 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   }, [isHost, refreshWaiting]);
 
   const disableAi = useCallback(async () => {
-    if (!aiActive && !processedTrack.current) return;
+    if (
+      !aiActive &&
+      !processedTrack.current &&
+      !rawTrack.current &&
+      !meter.current.reservationId
+    ) {
+      return;
+    }
     if (meter.current.interval) {
       clearInterval(meter.current.interval);
     }
@@ -498,28 +543,56 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
     aiSession.current?.stop();
     aiSession.current = null;
     await room.localParticipant.setMetadata(
-      JSON.stringify({ aiFaceActive: false }),
+      JSON.stringify({
+        ...parseParticipantMetadata(room.localParticipant.metadata),
+        aiFaceActive: false,
+      }),
     );
     setAiActive(false);
-    if (rawTrack.current) {
+    const currentCamera = room.localParticipant.getTrackPublication(
+      Track.Source.Camera,
+    )?.track;
+    if (rawTrack.current && currentCamera !== rawTrack.current) {
       await room.localParticipant.publishTrack(rawTrack.current, {
         source: Track.Source.Camera,
       });
     }
-    const remaining = meter.current.reserved - meter.current.charged;
-    if (remaining > 0) {
-      await apiFetch("/credits/meter/release", {
-        method: "POST",
-        ...jsonBody({
-          roomId: roomInfo.id,
-          amountMilli: remaining,
-          idempotencyKey: `release:${roomInfo.id}:${Date.now()}`,
-        }),
-      });
-      setWallet((value) => value + remaining);
+    if (meter.current.reservationId) {
+      const released = await apiFetch<{ amountMilli: number }>(
+        "/credits/meter/release",
+        {
+          method: "POST",
+          ...jsonBody({
+            roomId: roomInfo.id,
+            reservationId: meter.current.reservationId,
+            idempotencyKey: `release:${roomInfo.id}:${Date.now()}`,
+          }),
+        },
+      );
+      setWallet((value) => value + Math.max(0, released.amountMilli));
     }
-    meter.current = { reserved: 0, charged: 0, interval: 0, window: 0 };
+    rawTrack.current = null;
+    meter.current = {
+      reservationId: "",
+      remaining: 0,
+      rate: 0,
+      interval: 0,
+      window: 0,
+      settling: false,
+    };
   }, [aiActive, room, roomInfo.id]);
+
+  useEffect(() => {
+    const releaseOnExit = () => {
+      void disableAi();
+    };
+    room.on(RoomEvent.Disconnected, releaseOnExit);
+    window.addEventListener("pagehide", releaseOnExit);
+    return () => {
+      room.off(RoomEvent.Disconnected, releaseOnExit);
+      window.removeEventListener("pagehide", releaseOnExit);
+    };
+  }, [disableAi, room]);
 
   useEffect(
     () => () => {
@@ -537,24 +610,11 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
     setAiBusy(true);
     setError(null);
     try {
-      const quote = await apiFetch<{
-        milliCreditsPerMinute: number;
-        fiveMinuteReservationMilli: number;
-      }>(
-        `/credits/quote?roomId=${encodeURIComponent(roomInfo.id)}&mode=AI_FACE&quality=${quality.toUpperCase()}`,
-      );
-      const rate = quote.milliCreditsPerMinute;
-      const reservation = quote.fiveMinuteReservationMilli;
-      await apiFetch("/credits/meter/reserve", {
-        method: "POST",
-        ...jsonBody({
-          roomId: roomInfo.id,
-          amountMilli: reservation,
-          idempotencyKey: `reserve:${roomInfo.id}:${Date.now()}`,
-        }),
-      });
-      meter.current.reserved = reservation;
-      setWallet((value) => value - reservation);
+      const reserved = await reserveAiCredits();
+      meter.current.reservationId = reserved.id;
+      meter.current.remaining = reserved.reservationRemainingMilli;
+      meter.current.rate = reserved.milliCreditsPerMinute;
+      setWallet((value) => value - reserved.reservationMilli);
 
       const activation = await apiFetch<{ faceImageUrl: string }>(
         `/faces/${selectedFace}/activate`,
@@ -593,42 +653,91 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       aiSession.current = session;
       processedTrack.current = nextProcessed;
       await room.localParticipant.setMetadata(
-        JSON.stringify({ aiFaceActive: true, disclosureVersion: "2026-06-11" }),
+        JSON.stringify({
+          ...parseParticipantMetadata(room.localParticipant.metadata),
+          aiFaceActive: true,
+          disclosureVersion: "2026-06-11",
+        }),
       );
       setAiActive(true);
 
       meter.current.interval = setInterval(() => {
-        const currentWindow = meter.current.window++;
-        const charge = Math.ceil((15_000 * rate) / 60_000);
-        void apiFetch("/credits/meter/settle", {
-          method: "POST",
-          ...jsonBody({
-            roomId: roomInfo.id,
-            meteringWindow: `${roomInfo.id}:${room.localParticipant.identity}:${currentWindow}:${Date.now()}`,
-            billableMilliseconds: 15_000,
-            milliCreditsPerMinute: rate,
-            mode: "AI_FACE",
-            quality: quality.toUpperCase(),
-          }),
-        })
-          .then(() => {
-            meter.current.charged += charge;
-          })
-          .catch((value) => {
-            setError(
-              value instanceof Error ? value.message : "AI metering stopped",
-            );
-            void disableAi();
-          });
+        void settleAiWindow();
       }, 15_000);
     } catch (value) {
+      try {
+        await disableAi();
+      } catch {
+        // Preserve the original activation error.
+      }
       setError(
         value instanceof Error
-          ? `${value.message}. Raw camera remains unpublished until you turn AI off.`
+          ? `${value.message}. AI mode was stopped and the normal camera was restored.`
           : "AI face activation failed",
       );
     } finally {
       setAiBusy(false);
+    }
+  }
+
+  async function reserveAiCredits() {
+    return apiFetch<{
+      id: string;
+      reservationMilli: number;
+      reservationRemainingMilli: number;
+      milliCreditsPerMinute: number;
+    }>("/credits/meter/reserve", {
+      method: "POST",
+      ...jsonBody({
+        roomId: roomInfo.id,
+        mode: "AI_FACE",
+        quality: quality.toUpperCase(),
+        idempotencyKey: `reserve:${roomInfo.id}:${Date.now()}`,
+      }),
+    });
+  }
+
+  async function settleAiWindow() {
+    if (meter.current.settling || !meter.current.reservationId) return;
+    meter.current.settling = true;
+    try {
+      const expectedCharge = Math.ceil((15_000 * meter.current.rate) / 60_000);
+      if (meter.current.remaining < expectedCharge) {
+        const released = await apiFetch<{ amountMilli: number }>(
+          "/credits/meter/release",
+          {
+            method: "POST",
+            ...jsonBody({
+              reservationId: meter.current.reservationId,
+              idempotencyKey: `release:${roomInfo.id}:${Date.now()}`,
+            }),
+          },
+        );
+        setWallet((value) => value + Math.max(0, released.amountMilli));
+        const next = await reserveAiCredits();
+        meter.current.reservationId = next.id;
+        meter.current.remaining = next.reservationRemainingMilli;
+        meter.current.rate = next.milliCreditsPerMinute;
+        setWallet((value) => value - next.reservationMilli);
+      }
+      const currentWindow = meter.current.window++;
+      const usage = await apiFetch<{ milliCreditsCharged: number }>(
+        "/credits/meter/settle",
+        {
+          method: "POST",
+          ...jsonBody({
+            reservationId: meter.current.reservationId,
+            meteringWindow: `${roomInfo.id}:${room.localParticipant.identity}:${currentWindow}:${Date.now()}`,
+            billableMilliseconds: 15_000,
+          }),
+        },
+      );
+      meter.current.remaining -= usage.milliCreditsCharged;
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "AI metering stopped");
+      await disableAi();
+    } finally {
+      meter.current.settling = false;
     }
   }
 
@@ -655,6 +764,11 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
   }
 
   async function endCall() {
+    if (!isHost) {
+      await disableAi();
+      room.disconnect();
+      return;
+    }
     try {
       await disableAi();
       await apiFetch(`/rooms/${roomInfo.id}/end`, {
@@ -707,7 +821,11 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
           <span>
             <Wifi size={15} /> {network}
           </span>
-          <span>{creditsFromMilli(wallet)} credits</span>
+          {accountAiAvailable ? (
+            <span>{creditsFromMilli(wallet)} credits</span>
+          ) : (
+            <span>Guest</span>
+          )}
           <span>
             <Users size={15} /> {room.numParticipants}
           </span>
@@ -816,7 +934,7 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
           <MessageCircle />
           <span>Chat</span>
         </button>
-        <div className="ai-control">
+        {accountAiAvailable ? <div className="ai-control">
           <select
             aria-label="AI face profile"
             value={selectedFace}
@@ -850,10 +968,10 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
             {aiBusy ? <LoaderCircle className="spin" /> : <Sparkles />}
             <span>{aiActive ? "AI on" : "AI face"}</span>
           </button>
-        </div>
+        </div> : null}
         <button className="call-control end" onClick={() => void endCall()}>
           <PhoneOff />
-          <span>End</span>
+          <span>{isHost ? "End" : "Leave"}</span>
         </button>
       </footer>
     </div>

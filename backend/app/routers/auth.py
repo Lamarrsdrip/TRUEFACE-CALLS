@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import timedelta
@@ -7,6 +8,10 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
+from ..email_service import send_email
+from ..face_storage import purge_face_profile_data
+from ..provider_policy import CONFIGURED, provider_configuration_status
+from ..routers.providers import provider_values
 from ..security import (
     PASSWORDS,
     create_access_token,
@@ -19,6 +24,7 @@ from ..security import (
 from ..serializers import iso, json_safe, utc_now
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+LOGGER = logging.getLogger("trueface.auth")
 
 
 class SignupBody(BaseModel):
@@ -79,14 +85,40 @@ def _safe_user(user: dict) -> dict:
     }
 
 
+def _valid_password(password: str) -> bool:
+    return bool(
+        len(password) >= 12
+        and re.search(r"[a-z]", password)
+        and re.search(r"[A-Z]", password)
+        and re.search(r"\d", password)
+    )
+
+
+def _deliver_auth_email(
+    request: Request,
+    recipient: str,
+    subject: str,
+    text: str,
+) -> bool:
+    values = provider_values(request, "email")
+    if provider_configuration_status("email", values) != CONFIGURED:
+        return False
+    try:
+        send_email(values, recipient, subject, text)
+        return True
+    except Exception:
+        LOGGER.exception("Authentication email delivery failed recipient=%s", recipient)
+        return False
+
+
 @router.get("/csrf")
-def csrf(response: Response) -> dict:
+def csrf(request: Request, response: Response) -> dict:
     token = new_token(24)
     response.set_cookie(
         "tf_csrf",
         token,
         httponly=False,
-        secure=False,
+        secure=request.app.state.settings.app_url.startswith("https://"),
         samesite="lax",
         path="/",
     )
@@ -95,17 +127,15 @@ def csrf(response: Response) -> dict:
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(body: SignupBody, request: Request, response: Response) -> dict:
-    if not (
-        re.search(r"[a-z]", body.password)
-        and re.search(r"[A-Z]", body.password)
-        and re.search(r"\d", body.password)
-    ):
+    if not _valid_password(body.password):
         raise HTTPException(
             status_code=422,
             detail="Password must include uppercase, lowercase, and a number",
         )
     db = request.app.state.db
-    email = body.email.lower()
+    email = body.email.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
     if db.users.find_one({"email": email}):
         raise HTTPException(status_code=409, detail="Email is already registered")
     now = utc_now()
@@ -172,8 +202,31 @@ def signup(body: SignupBody, request: Request, response: Response) -> dict:
             "createdAt": now,
         }
     )
+    verification_url = (
+        f"{request.app.state.settings.app_url}/verify-email?token={verification}"
+    )
+    email_sent = _deliver_auth_email(
+        request,
+        email,
+        "Verify your TrueFace Calls email",
+        (
+            "Verify your email address to finish setting up TrueFace Calls:\n\n"
+            f"{verification_url}\n\n"
+            "This link expires in 24 hours."
+        ),
+    )
     _start_session(request, response, user)
-    return {"user": _safe_user(user)}
+    return {
+        "user": _safe_user(user),
+        "verification": {
+            "emailSent": email_sent,
+            **(
+                {"developmentToken": verification}
+                if request.app.state.settings.app_url.startswith("http://localhost")
+                else {}
+            ),
+        },
+    }
 
 
 @router.post("/login")
@@ -195,6 +248,8 @@ def admin_login(body: LoginBody, request: Request, response: Response) -> dict:
     user = request.app.state.db.users.find_one({"email": body.email.lower()})
     if not user or not verify_password(user["passwordHash"], body.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user["status"] != "ACTIVE":
+        raise HTTPException(status_code=403, detail="Account is not active")
     admin = request.app.state.db.admin_users.find_one(
         {"userId": user["id"], "active": True}
     )
@@ -270,6 +325,10 @@ def refresh(request: Request, response: Response) -> dict:
         {"id": session["id"]}, {"$set": {"revokedAt": utc_now()}}
     )
     user = request.app.state.db.users.find_one({"id": session["userId"]})
+    if not user or user.get("status") != "ACTIVE":
+        response.delete_cookie("tf_access", path="/")
+        response.delete_cookie("tf_refresh", path="/")
+        return {"refreshed": False}
     _start_session(request, response, user)
     return {"refreshed": True, "user": _safe_user(user)}
 
@@ -315,6 +374,21 @@ def forgot_password(body: dict, request: Request) -> dict:
                 "createdAt": utc_now(),
             }
         )
+        reset_url = (
+            f"{request.app.state.settings.app_url}/reset-password"
+            f"?token={development_token}"
+        )
+        _deliver_auth_email(
+            request,
+            user["email"],
+            "Reset your TrueFace Calls password",
+            (
+                "Use this secure link to reset your password:\n\n"
+                f"{reset_url}\n\n"
+                "This link expires in one hour. Ignore this message if you did "
+                "not request a reset."
+            ),
+        )
     return {
         "accepted": True,
         **(
@@ -329,8 +403,11 @@ def forgot_password(body: dict, request: Request) -> dict:
 @router.post("/reset-password")
 def reset_password(body: dict, request: Request) -> dict:
     new_password = str(body.get("password", ""))
-    if len(new_password) < 12:
-        raise HTTPException(status_code=422, detail="Password is too short")
+    if not _valid_password(new_password):
+        raise HTTPException(
+            status_code=422,
+            detail="Password must include uppercase, lowercase, and a number",
+        )
     token = request.app.state.db.auth_tokens.find_one(
         {
             "tokenHash": hash_token(str(body.get("token", ""))),
@@ -383,20 +460,41 @@ def delete_account(
 ) -> dict:
     if body.get("confirmation") != "DELETE":
         raise HTTPException(status_code=400, detail='Type "DELETE" to confirm')
+    db = request.app.state.db
+    now = utc_now()
+    for profile in db.face_profiles.find(
+        {"userId": user["id"], "deletedAt": None}
+    ):
+        purge_face_profile_data(db, profile)
+        db.face_profiles.update_one(
+            {"id": profile["id"]},
+            {
+                "$set": {
+                    "active": False,
+                    "consentRevokedAt": now,
+                    "deletedAt": now,
+                    "updatedAt": now,
+                }
+            },
+        )
+        db.consent_logs.update_many(
+            {"faceProfileId": profile["id"], "revokedAt": None},
+            {"$set": {"revokedAt": now}},
+        )
     scheduled = utc_now() + timedelta(days=7)
-    request.app.state.db.users.update_one(
+    db.users.update_one(
         {"id": user["id"]},
         {
             "$set": {
                 "status": "DELETION_PENDING",
                 "deletionScheduledAt": scheduled,
-                "updatedAt": utc_now(),
+                "updatedAt": now,
             }
         },
     )
-    request.app.state.db.sessions.update_many(
+    db.sessions.update_many(
         {"userId": user["id"], "revokedAt": None},
-        {"$set": {"revokedAt": utc_now()}},
+        {"$set": {"revokedAt": now}},
     )
     response.delete_cookie("tf_access", path="/")
     response.delete_cookie("tf_refresh", path="/")

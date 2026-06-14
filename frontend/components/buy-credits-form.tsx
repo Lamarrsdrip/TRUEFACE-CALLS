@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ExternalLink, LoaderCircle } from "lucide-react";
 import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch, jsonBody } from "../lib/api";
+import { moneyFromMinor } from "../lib/format";
 
 interface CreditPack {
   key: string;
@@ -17,12 +18,22 @@ export function BuyCreditsForm() {
   const packs = useApiResource<{ packs: CreditPack[] }>(
     "/billing/credit-packs",
   );
+  const methods = useApiResource<{
+    methods: Array<{ key: "bank" | "paystack" | "flutterwave"; label: string }>;
+  }>("/billing/payment-methods");
   const [selectedKey, setSelectedKey] = useState("");
   const [provider, setProvider] = useState<
-    "stripe" | "paystack" | "flutterwave" | "bank"
-  >("stripe");
+    "paystack" | "flutterwave" | "bank"
+  >("bank");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const available = methods.data?.methods ?? [];
+    if (available.length && !available.some((item) => item.key === provider)) {
+      setProvider(available[0]!.key);
+    }
+  }, [methods.data, provider]);
 
   async function checkout() {
     setBusy(true);
@@ -76,7 +87,7 @@ export function BuyCreditsForm() {
               {item.name || `${item.creditsMilli / 1000} credits`}
             </strong>
             <span>
-              {item.currency} {(item.amountMinor / 100).toFixed(2)}
+              {moneyFromMinor(item.amountMinor)}
               {index === 0 ? " · starter" : ""}
             </span>
           </button>
@@ -89,24 +100,31 @@ export function BuyCreditsForm() {
           value={provider}
           onChange={(event) =>
             setProvider(
-              event.target.value as "stripe" | "paystack" | "flutterwave",
+              event.target.value as "paystack" | "flutterwave" | "bank",
             )
           }
         >
-          <option value="stripe">Stripe</option>
-          <option value="paystack">Paystack</option>
-          <option value="flutterwave">Flutterwave</option>
-          <option value="bank">Bank transfer</option>
+          {methods.data?.methods.map((method) => (
+            <option value={method.key} key={method.key}>
+              {method.label}
+              {method.key === "bank" ? " (recommended)" : ""}
+            </option>
+          ))}
         </select>
       </div>
       <div className="notice notice-info">
-        Checkout opens only when this provider is configured by an admin.
-        Provider webhooks, not redirects, settle your credit balance.
+        Bank transfers stay pending until an administrator verifies them.
+        Paystack and Flutterwave require live provider keys and webhooks.
       </div>
       <button
         className="button button-primary"
         onClick={checkout}
-        disabled={busy || packs.loading}
+        disabled={
+          busy ||
+          packs.loading ||
+          methods.loading ||
+          methods.data?.methods.length === 0
+        }
       >
         {busy ? (
           <LoaderCircle className="spin" size={17} />

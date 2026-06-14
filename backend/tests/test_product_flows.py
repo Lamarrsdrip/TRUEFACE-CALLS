@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.app.seed import seed_database
+from backend.app.vault import SecretVault
 from backend.server import create_app
 
 
@@ -22,6 +23,46 @@ def signup(client: TestClient, email: str = "user@example.com") -> dict[str, str
     )
     assert response.status_code == 201
     return headers
+
+
+def configure_manual_bank(mongo_db) -> None:
+    mongo_db.app_settings.insert_one(
+        {
+            "namespace": "provider",
+            "key": "manual-bank",
+            "publicValue": {
+                "enabled": "true",
+                "bankName": "Test Bank",
+                "accountName": "TrueFace Calls",
+                "accountNumber": "0123456789",
+                "expiryMinutes": "30",
+                "proofRequired": "false",
+            },
+            "encryptedValue": {},
+            "secretFingerprint": {},
+        }
+    )
+
+
+def upload_face_image(client: TestClient, headers: dict[str, str]) -> dict:
+    payload = b"\xff\xd8\xff" + b"\x00" * 64
+    signed = client.post(
+        "/api/faces/upload-url",
+        headers=headers,
+        json={"contentType": "image/jpeg", "sizeBytes": len(payload)},
+    )
+    assert signed.status_code == 200
+    upload = client.put(
+        signed.json()["url"],
+        content=payload,
+        headers={"content-type": "image/jpeg"},
+    )
+    assert upload.status_code == 200
+    return {
+        "objectKey": signed.json()["objectKey"],
+        "mimeType": "image/jpeg",
+        "sizeBytes": len(payload),
+    }
 
 
 def test_provider_secrets_are_encrypted_and_masked(mongo_db, master_key):
@@ -60,6 +101,7 @@ def test_provider_secrets_are_encrypted_and_masked(mongo_db, master_key):
 def test_trial_user_cannot_buy_topup_but_manual_subscription_stays_pending(
     mongo_db, master_key
 ):
+    configure_manual_bank(mongo_db)
     client = TestClient(create_app(database=mongo_db, master_key=master_key))
     headers = signup(client)
     wallet = client.get("/api/credits/wallet").json()
@@ -86,6 +128,25 @@ def test_trial_user_cannot_buy_topup_but_manual_subscription_stays_pending(
 def test_room_persists_with_distinct_host_and_guest_urls(mongo_db, master_key):
     client = TestClient(create_app(database=mongo_db, master_key=master_key))
     headers = signup(client)
+    vault = SecretVault(master_key)
+    mongo_db.app_settings.insert_one(
+        {
+            "namespace": "provider",
+            "key": "livekit",
+            "publicValue": {
+                "enabled": "true",
+                "url": "wss://example.livekit.cloud",
+            },
+            "encryptedValue": {
+                "apiKey": vault.encrypt("test-key"),
+                "apiSecret": vault.encrypt("test-secret"),
+            },
+            "secretFingerprint": {
+                "apiKey": vault.fingerprint("test-key"),
+                "apiSecret": vault.fingerprint("test-secret"),
+            },
+        }
+    )
 
     created = client.post(
         "/api/rooms",
@@ -112,6 +173,7 @@ def test_face_profile_requires_all_consent_and_reports_readiness(
 ):
     client = TestClient(create_app(database=mongo_db, master_key=master_key))
     headers = signup(client)
+    uploaded = upload_face_image(client, headers)
     quality = client.post(
         "/api/faces/quality-check",
         headers=headers,
@@ -129,18 +191,10 @@ def test_face_profile_requires_all_consent_and_reports_readiness(
         headers=headers,
         json={
             "name": "Authorized profile",
-            "objectKey": "gridfs:front",
-            "mimeType": "image/jpeg",
-            "sizeBytes": 100000,
-            "width": 1200,
-            "height": 1200,
-            "quality": quality.json(),
             "images": [
                 {
-                    "objectKey": "gridfs:front",
+                    **uploaded,
                     "role": "FRONT",
-                    "mimeType": "image/jpeg",
-                    "sizeBytes": 100000,
                     "width": 1200,
                     "height": 1200,
                     "quality": quality.json(),
@@ -160,3 +214,42 @@ def test_face_profile_requires_all_consent_and_reports_readiness(
     assert created.status_code == 200
     assert created.json()["readinessLabel"] in {"FAIR", "GOOD", "EXCELLENT"}
     assert mongo_db.consent_logs.count_documents({}) == 1
+
+
+def test_face_profile_rejects_another_users_private_upload(
+    mongo_db, master_key
+):
+    owner = TestClient(create_app(database=mongo_db, master_key=master_key))
+    owner_headers = signup(owner, "owner@example.com")
+    uploaded = upload_face_image(owner, owner_headers)
+
+    attacker = TestClient(create_app(database=mongo_db, master_key=master_key))
+    attacker_headers = signup(attacker, "attacker@example.com")
+    response = attacker.post(
+        "/api/faces",
+        headers=attacker_headers,
+        json={
+            "name": "Stolen upload",
+            "images": [
+                {
+                    **uploaded,
+                    "role": "FRONT",
+                    "width": 1200,
+                    "height": 1200,
+                    "quality": {
+                        "score": 100,
+                        "passed": True,
+                        "checks": {},
+                    },
+                }
+            ],
+            "consent": {
+                "ownsOrHasPermission": True,
+                "consentsToFaceUse": True,
+                "acceptsFaceTerms": True,
+            },
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["message"] == "Face image is not owned by this user"

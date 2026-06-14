@@ -6,7 +6,7 @@ import hmac
 import json
 import time
 
-from fastapi import HTTPException
+from .errors import api_error
 
 
 class InviteSigner:
@@ -44,4 +44,8 @@ class InviteSigner:
                 raise ValueError("claims")
             return parsed
         except Exception as error:
-            raise HTTPException(status_code=403, detail="Invite is invalid or expired") from error
+            raise api_error(
+                403,
+                "INVITE_INVALID",
+                "This call invite is invalid or has expired",
+            ) from error

@@ -2,6 +2,10 @@ import base64
 
 import mongomock
 import pytest
+from mongomock.gridfs import enable_gridfs_integration
+
+
+enable_gridfs_integration()
 
 
 @pytest.fixture()

@@ -12,15 +12,15 @@ export default function AdminAuditPage() {
   async function exportAudit() {
     setExporting(true);
     try {
-      const payload = await apiFetch<unknown>("/admin/audit-logs/export");
+      const payload = await apiFetch<string>("/admin/audit-logs/export");
       const url = URL.createObjectURL(
-        new Blob([JSON.stringify(payload, null, 2)], {
-          type: "application/json",
+        new Blob([payload], {
+          type: "text/csv;charset=utf-8",
         }),
       );
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `trueface-admin-audit-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.download = `trueface-admin-audit-${new Date().toISOString().slice(0, 10)}.csv`;
       anchor.click();
       URL.revokeObjectURL(url);
     } finally {

@@ -1,21 +1,23 @@
 # Payment Flow
 
-Stripe, Paystack, and Flutterwave create pending payment records before
-checkout. Only verified provider webhooks settle payments. Redirects do not
-credit wallets or activate subscriptions.
+## Manual Bank
 
-Internal bank transfer:
+1. User chooses a plan or eligible credit pack.
+2. The API creates a pending session with exact Naira amount, unique `TFC-*`
+   reference and configured expiry.
+3. Checkout shows bank details, narration guidance and countdown.
+4. Receipt upload is private and can be required by admin policy.
+5. Expired sessions remain reviewable but never auto-credit.
+6. An authorized admin approves or rejects.
+7. Approval activates the subscription or grants purchased credits once.
+8. Amount, plan/pack, reference, reviewer and decision are audited.
 
-1. Admin enables and configures bank details in `/admin/providers`.
-2. User chooses Bank Transfer for a plan or configured credit pack.
-3. The checkout shows bank details and requires a transfer reference and,
-   when configured, a private proof image/PDF.
-4. Payment remains `PENDING`.
-5. Finance opens the proof through a five-minute signed URL.
-6. Approval activates the subscription or adds purchased credits in one
-   database transaction.
-7. Rejection records a reason and does not grant value.
-8. Every decision is written to the audit log.
+## Paystack And Flutterwave
 
-Manual clicks never simulate success. Automated bank reconciliation can later
-be added as another signed webhook provider.
+Checkout creates a pending payment before redirecting. Only a valid signed
+terminal webhook with exact NGN currency and amount can fulfill it. Nonterminal
+events are ignored, mismatches require review, and repeated events are
+idempotent.
+
+These adapters create one paid entitlement period. Automatic recurring
+provider subscription mandates and renewal webhooks are not yet implemented.

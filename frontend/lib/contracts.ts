@@ -162,11 +162,13 @@ export const providerKeySchema = z.enum([
   "livekit",
   "storage",
   "email",
-  "stripe",
   "paystack",
   "flutterwave",
-  "redis",
+  "ai",
   "gpu",
+  "manual-bank",
+  "monitoring",
+  "whatsapp",
 ]);
 export type ProviderKey = z.infer<typeof providerKeySchema>;
 

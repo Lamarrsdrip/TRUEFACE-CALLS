@@ -7,6 +7,8 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly details?: unknown,
+    readonly code?: string,
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -56,11 +58,21 @@ export async function apiFetch<T>(
     : await response.text();
 
   if (!response.ok) {
+    const errorPayload =
+      typeof payload === "object" && payload
+        ? (payload as { message?: unknown; code?: unknown; requestId?: unknown })
+        : null;
     const message =
-      typeof payload === "object" && payload && "message" in payload
-        ? String(payload.message)
+      errorPayload?.message
+        ? String(errorPayload.message)
         : `Request failed (${response.status})`;
-    throw new ApiError(message, response.status, payload);
+    throw new ApiError(
+      message,
+      response.status,
+      payload,
+      errorPayload?.code ? String(errorPayload.code) : undefined,
+      errorPayload?.requestId ? String(errorPayload.requestId) : undefined,
+    );
   }
   return payload as T;
 }

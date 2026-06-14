@@ -1,16 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AuthFrame } from "../../components/auth-form";
 import { apiFetch, jsonBody } from "../../lib/api";
 
 export default function ResetPasswordPage() {
+  return (
+    <Suspense
+      fallback={
+        <AuthFrame
+          title="Choose a new password"
+          description="Loading secure reset form..."
+        >
+          <div className="state-message">Loading…</div>
+        </AuthFrame>
+      }
+    >
+      <ResetPasswordForm />
+    </Suspense>
+  );
+}
+
+function ResetPasswordForm() {
+  const search = useSearchParams();
   const [token, setToken] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setToken(sessionStorage.getItem("trueface-development-reset-token") ?? "");
-  }, []);
+    setToken(
+      search.get("token") ??
+        sessionStorage.getItem("trueface-development-reset-token") ??
+        "",
+    );
+  }, [search]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

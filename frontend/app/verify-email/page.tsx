@@ -1,19 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AuthFrame } from "../../components/auth-form";
 import { apiFetch, jsonBody } from "../../lib/api";
 
 export default function VerifyEmailPage() {
+  return (
+    <Suspense
+      fallback={
+        <AuthFrame
+          title="Verify your email"
+          description="Loading secure verification form..."
+        >
+          <div className="state-message">Loading…</div>
+        </AuthFrame>
+      }
+    >
+      <VerifyEmailForm />
+    </Suspense>
+  );
+}
+
+function VerifyEmailForm() {
+  const search = useSearchParams();
   const [token, setToken] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     setToken(
-      sessionStorage.getItem("trueface-development-verification-token") ?? "",
+      search.get("token") ??
+        sessionStorage.getItem("trueface-development-verification-token") ??
+        "",
     );
-  }, []);
+  }, [search]);
 
   async function verify(event: React.FormEvent) {
     event.preventDefault();

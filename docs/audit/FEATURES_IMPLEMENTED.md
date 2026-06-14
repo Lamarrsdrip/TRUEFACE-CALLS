@@ -1,19 +1,19 @@
 # Features Implemented
 
-- Signup, login, email verification, password reset, secure cookie sessions,
-  CSRF protection, rate limiting, and account deletion scheduling.
-- Trial, Basic, Pro, and Business plans with admin-editable entitlements.
-- Split monthly included and purchased credit balances with transaction and
-  usage histories.
-- Server-authoritative AI rate calculation, quality/participant multipliers,
-  reservations, settlement, release, exhaustion, and reset windows.
-- Persistent call rooms, signed expiring links, optional passwords, waiting
-  rooms, guest join, rejoin/copy/end controls, and call history.
-- LiveKit camera, microphone, screen share, chat, reconnect behavior, network
-  indicator, and host room termination.
-- Consent-backed multi-image face profiles, per-image quality validation,
-  readiness scoring, moderation, activation, revocation, and deletion.
-- Stripe, Paystack, Flutterwave, and internal bank-transfer checkout adapters.
-- Admin users, credits, plans, payments, calls, moderation, reports,
-  providers, settings, broadcasts, health, cost estimates, and audit export.
-- Responsive customer and admin interfaces for phone and desktop browsers.
+- Signup, login, logout, refresh, email verification and password reset.
+- Trial, Basic, Pro and Business plans with admin-editable Naira pricing.
+- Included and purchased credits, reservations, settlement, release and
+  transaction/usage history.
+- Manual bank payment sessions with exact amount, unique reference, expiry,
+  proof upload, review, approval/rejection and automatic fulfillment.
+- Optional Paystack and Flutterwave checkout plus signed webhook settlement.
+- Persistent rooms, signed expiring links, passwords, waiting room, guests,
+  copy/rejoin/end controls and call history.
+- LiveKit camera, microphone, screen share, chat and network UI.
+- Multi-image face profiles, browser quality checks, readiness score,
+  moderation, consent revocation and physical GridFS deletion.
+- Browser MediaPipe tracking, processed canvas publication, AI disclosure,
+  tracking-loss pause and raw-camera restoration.
+- Admin users, plans, credits, payments, calls, reports, face moderation,
+  providers, cost estimates, broadcasts, readiness and audit export.
+- Mobile-first responsive customer and admin interfaces.

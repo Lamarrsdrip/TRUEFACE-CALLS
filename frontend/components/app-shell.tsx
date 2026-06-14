@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
   Clock3,
@@ -11,6 +11,7 @@ import {
   LifeBuoy,
   Menu,
   Settings,
+  Stethoscope,
   Shield,
   Sparkles,
   Users,
@@ -18,7 +19,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useApiResource } from "../hooks/use-api-resource";
 import { apiFetch } from "../lib/api";
 import { Brand } from "./brand";
@@ -30,6 +31,7 @@ const nav = [
   { href: "/calls", label: "Call history", icon: History },
   { href: "/credits", label: "Credits", icon: WalletCards },
   { href: "/billing", label: "Billing", icon: CreditCard },
+  { href: "/system-check", label: "System check", icon: Stethoscope },
   { href: "/privacy-settings", label: "Privacy", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -48,8 +50,12 @@ const mobileNav: Array<{
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [sessionAuthorized, setSessionAuthorized] = useState<boolean | null>(
+    null,
+  );
   const notifications = useApiResource<
     Array<{
       id: string;
@@ -60,6 +66,25 @@ export function AppShell({ children }: { children: ReactNode }) {
     }>
   >("/notifications");
   const unread = notifications.data?.filter((item) => !item.readAt).length ?? 0;
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch("/auth/session")
+      .then(() => {
+        if (active) setSessionAuthorized(true);
+      })
+      .catch(() => {
+        if (active) setSessionAuthorized(false);
+        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pathname, router]);
+
+  if (sessionAuthorized !== true) {
+    return <div className="admin-access-check">Verifying secure session…</div>;
+  }
 
   async function readNotification(id: string) {
     await apiFetch(`/notifications/${id}/read`, { method: "PATCH" });

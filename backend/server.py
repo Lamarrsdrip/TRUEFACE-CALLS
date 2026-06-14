@@ -3,8 +3,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import hashlib
 import hmac
+import logging
 import time
+import uuid
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 import jwt
 from fastapi import FastAPI, Request
@@ -23,6 +26,7 @@ try:
     from .app.routers.providers import router as providers_router
     from .app.routers.rooms import router as rooms_router
     from .app.routers.safety import router as safety_router
+    from .app.routers.system import router as system_router
     from .app.seed import seed_database
     from .app.serializers import utc_now
     from .app.vault import SecretVault
@@ -37,9 +41,37 @@ except ImportError:
     from app.routers.providers import router as providers_router
     from app.routers.rooms import router as rooms_router
     from app.routers.safety import router as safety_router
+    from app.routers.system import router as system_router
     from app.seed import seed_database
     from app.serializers import utc_now
     from app.vault import SecretVault
+LOGGER = logging.getLogger("trueface.api")
+
+
+class StrictHostMiddleware:
+    def __init__(self, app, allowed_hosts: tuple[str, ...]):
+        self.app = app
+        self.allowed_hosts = {host.lower() for host in allowed_hosts if host}
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            raw_hosts = [
+                value
+                for key, value in scope.get("headers", [])
+                if key.lower() == b"host"
+            ]
+            host = _normalized_host(raw_hosts[0] if len(raw_hosts) == 1 else b"")
+            if not host or host not in self.allowed_hosts:
+                response = JSONResponse(
+                    status_code=400,
+                    content={
+                        "message": "Invalid request host",
+                        "code": "INVALID_HOST",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def create_app(database=None, master_key: str | None = None) -> FastAPI:
@@ -76,19 +108,23 @@ def create_app(database=None, master_key: str | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
+    application.add_middleware(
+        StrictHostMiddleware,
+        allowed_hosts=settings.allowed_hosts,
+    )
     application.state.settings = settings
     application.state.db = database
     application.state.vault = SecretVault(settings.settings_master_key)
     application.state.decode_token = lambda token: jwt.decode(
         token, settings.auth_secret, algorithms=["HS256"]
     )
-    application.state.sign_upload = lambda object_key: hmac.new(
-        settings.auth_secret.encode(),
-        f"upload:{object_key}".encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    application.state.verify_upload = lambda object_key, token: hmac.compare_digest(
-        application.state.sign_upload(object_key), token
+    application.state.sign_upload = lambda object_key, content_type: _sign_upload(
+        settings.auth_secret, object_key, content_type
+    )
+    application.state.verify_upload = (
+        lambda object_key, content_type, token: _verify_upload(
+            settings.auth_secret, object_key, content_type, token
+        )
     )
     application.state.sign_download = lambda object_key, expires: (
         f"{expires}."
@@ -104,6 +140,9 @@ def create_app(database=None, master_key: str | None = None) -> FastAPI:
 
     @application.middleware("http")
     async def csrf_guard(request: Request, call_next):
+        request.state.request_id = request.headers.get("x-request-id") or str(
+            uuid.uuid4()
+        )
         if application.state.db is not None:
             limit = (
                 5
@@ -144,21 +183,60 @@ def create_app(database=None, master_key: str | None = None) -> FastAPI:
                 return JSONResponse(
                     status_code=403, content={"message": "Invalid CSRF token"}
                 )
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers["x-request-id"] = request.state.request_id
+        return response
 
     @application.exception_handler(HTTPException)
-    async def http_error(_request: Request, error: HTTPException):
+    async def http_error(request: Request, error: HTTPException):
+        detail = error.detail
+        if isinstance(detail, dict):
+            message = str(detail.get("message", "Request failed"))
+            code = str(detail.get("code", "REQUEST_FAILED"))
+        else:
+            message = str(detail)
+            code = "REQUEST_FAILED"
         return JSONResponse(
             status_code=error.status_code,
-            content={"message": str(error.detail)},
+            content={
+                "message": message,
+                "code": code,
+                "requestId": getattr(request.state, "request_id", None),
+            },
         )
 
     @application.exception_handler(RequestValidationError)
-    async def validation_error(_request: Request, error: RequestValidationError):
+    async def validation_error(request: Request, error: RequestValidationError):
         first = error.errors()[0] if error.errors() else {}
         return JSONResponse(
             status_code=422,
-            content={"message": str(first.get("msg", "Invalid request"))},
+            content={
+                "message": str(first.get("msg", "Invalid request")),
+                "code": "VALIDATION_FAILED",
+                "requestId": getattr(request.state, "request_id", None),
+            },
+        )
+
+    @application.exception_handler(Exception)
+    async def unhandled_error(request: Request, error: Exception):
+        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        LOGGER.error(
+            "Unhandled API error request_id=%s method=%s path=%s",
+            request_id,
+            request.method,
+            request.url.path,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "message": (
+                    "An unexpected server error occurred. "
+                    f"Support reference: {request_id}"
+                ),
+                "code": "INTERNAL_ERROR",
+                "requestId": request_id,
+            },
         )
 
     @application.get("/api/health")
@@ -177,6 +255,7 @@ def create_app(database=None, master_key: str | None = None) -> FastAPI:
     application.include_router(rooms_router)
     application.include_router(faces_router)
     application.include_router(safety_router)
+    application.include_router(system_router)
     application.include_router(notifications_router)
     application.include_router(admin_router)
     return application
@@ -198,4 +277,43 @@ def _verify_download(secret: str, object_key: str, token: str) -> bool:
         return False
 
 
+def _sign_upload(secret: str, object_key: str, content_type: str) -> str:
+    expires = int(time.time()) + 900
+    signature = hmac.new(
+        secret.encode(),
+        f"upload:{object_key}:{content_type}:{expires}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{expires}.{signature}"
+
+
+def _verify_upload(
+    secret: str, object_key: str, content_type: str, token: str
+) -> bool:
+    try:
+        expires_text, signature = token.split(".", 1)
+        expires = int(expires_text)
+        if expires < int(time.time()):
+            return False
+        expected = hmac.new(
+            secret.encode(),
+            f"upload:{object_key}:{content_type}:{expires}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)
+    except Exception:
+        return False
+
+
 app = create_app()
+
+
+def _normalized_host(raw_host: bytes) -> str:
+    try:
+        value = raw_host.decode("ascii", "strict").strip()
+        if not value or any(character in value for character in "\r\n\t /\\@"):
+            return ""
+        parsed = urlsplit(f"//{value}")
+        return (parsed.hostname or "").lower()
+    except Exception:
+        return ""

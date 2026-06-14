@@ -106,7 +106,7 @@ export function AdminPlans() {
             </div>
             <div className="form-two">
               <div className="field">
-                <label>Monthly price</label>
+                <label>Monthly price (₦)</label>
                 <input
                   name="price"
                   type="number"

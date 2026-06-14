@@ -3,13 +3,19 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 import uuid
 from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pymongo import ReturnDocument
 
 from ..audit import audit
+from ..billing_rules import NAIRA_CURRENCY
+from ..face_storage import purge_face_profile_data
+from ..manual_payments import expire_manual_payments
+from ..payment_fulfillment import fulfill_payment
 from ..security import current_admin, current_user, require_permission
 from ..serializers import iso, json_safe, utc_now
 
@@ -27,7 +33,10 @@ def overview(
     _admin: dict = Depends(current_admin),
 ) -> dict:
     db = request.app.state.db
-    succeeded = list(db.payments.find({"status": "SUCCEEDED"}))
+    expire_manual_payments(db)
+    succeeded = list(
+        db.payments.find({"status": {"$in": ["SUCCEEDED", "APPROVED"]}})
+    )
     usage = list(db.usage_minutes.find({}))
     transactions = list(db.credit_transactions.find({}))
     return {
@@ -65,12 +74,14 @@ def users(
     _admin: dict = Depends(current_admin),
 ) -> list[dict]:
     db = request.app.state.db
+    expire_manual_payments(db)
     query = {}
     if search:
+        safe_search = re.escape(search.strip()[:100])
         query = {
             "$or": [
-                {"email": {"$regex": search, "$options": "i"}},
-                {"displayName": {"$regex": search, "$options": "i"}},
+                {"email": {"$regex": safe_search, "$options": "i"}},
+                {"displayName": {"$regex": safe_search, "$options": "i"}},
             ]
         }
     result = []
@@ -129,6 +140,11 @@ def update_user_status(
     request.app.state.db.users.update_one(
         {"id": user_id}, {"$set": {"status": status, "updatedAt": utc_now()}}
     )
+    if status != "ACTIVE":
+        request.app.state.db.sessions.update_many(
+            {"userId": user_id, "revokedAt": None},
+            {"$set": {"revokedAt": utc_now()}},
+        )
     audit(request.app.state.db, "USER_STATUS_UPDATED", "USER", user["id"], admin["id"], user_id, after={"status": status})
     return {"id": user_id, "status": status}
 
@@ -168,6 +184,7 @@ def payments(
     _admin: dict = Depends(current_admin),
 ) -> list[dict]:
     db = request.app.state.db
+    expire_manual_payments(db)
     query = {}
     if provider:
         query["provider"] = provider.upper()
@@ -188,83 +205,6 @@ def payments(
     return result
 
 
-def _fulfill_payment(db, payment: dict, admin_id: str) -> None:
-    key = f"manual-payment:{payment['id']}"
-    if db.credit_transactions.find_one({"idempotencyKey": key}):
-        return
-    wallet = db.credit_wallets.find_one({"userId": payment["userId"]})
-    metadata = payment.get("metadata") or {}
-    now = utc_now()
-    if payment["type"] == "SUBSCRIPTION":
-        plan = db.plans.find_one({"id": metadata.get("planId")})
-        if not plan:
-            raise HTTPException(status_code=409, detail="Payment plan no longer exists")
-        db.subscriptions.update_many(
-            {"userId": payment["userId"], "status": {"$in": ["TRIALING", "ACTIVE"]}},
-            {"$set": {"status": "CANCELED", "canceledAt": now, "updatedAt": now}},
-        )
-        db.subscriptions.insert_one(
-            {
-                "id": str(uuid.uuid4()),
-                "userId": payment["userId"],
-                "planId": plan["id"],
-                "provider": payment["provider"],
-                "status": "ACTIVE",
-                "currentPeriodStart": now,
-                "currentPeriodEnd": now + timedelta(days=plan["creditResetDays"]),
-                "createdAt": now,
-                "updatedAt": now,
-            }
-        )
-        grant = plan["monthlyCredits"]
-        db.credit_wallets.update_one(
-            {"id": wallet["id"]},
-            {
-                "$inc": {"availableMilliCredits": grant - wallet.get("includedMilliCredits", 0), "version": 1},
-                "$set": {
-                    "includedMilliCredits": grant,
-                    "includedResetAt": now + timedelta(days=plan["creditResetDays"]),
-                    "updatedAt": now,
-                },
-            },
-        )
-        wallet = db.credit_wallets.find_one({"id": wallet["id"]})
-        transaction_type = "SUBSCRIPTION_GRANT"
-        amount = grant
-    else:
-        amount = int(metadata.get("creditsMilli") or payment.get("creditsMilli") or 0)
-        db.credit_wallets.update_one(
-            {"id": wallet["id"]},
-            {
-                "$inc": {
-                    "availableMilliCredits": amount,
-                    "purchasedMilliCredits": amount,
-                    "lifetimePurchasedMilli": amount,
-                    "version": 1,
-                },
-                "$set": {"updatedAt": now},
-            },
-        )
-        wallet = db.credit_wallets.find_one({"id": wallet["id"]})
-        transaction_type = "PURCHASE"
-    db.credit_transactions.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "walletId": wallet["id"],
-            "userId": payment["userId"],
-            "paymentId": payment["id"],
-            "actorAdminId": admin_id,
-            "type": transaction_type,
-            "amountMilli": amount,
-            "balanceAfterMilli": wallet["availableMilliCredits"],
-            "source": "manual-payment",
-            "reason": "Administrator approved bank transfer",
-            "idempotencyKey": key,
-            "createdAt": now,
-        }
-    )
-
-
 @router.post("/payments/{payment_id}/decision")
 def decide_payment(
     payment_id: str,
@@ -278,17 +218,17 @@ def decide_payment(
     payment = db.payments.find_one({"id": payment_id, "provider": "MANUAL"})
     if not payment:
         raise HTTPException(status_code=404, detail="Manual payment not found")
-    if payment["status"] != "PENDING":
-        if payment["status"] == "SUCCEEDED":
-            _fulfill_payment(db, payment, admin["id"])
+    if payment["status"] not in {"PENDING", "EXPIRED"}:
+        if payment["status"] in {"SUCCEEDED", "APPROVED"}:
+            fulfill_payment(db, payment, actor_admin_id=admin["id"])
         return {"id": payment_id, "status": payment["status"], "idempotent": True}
     decision = str(body.get("decision", ""))
     if decision not in {"APPROVE", "REJECT"}:
         raise HTTPException(status_code=422, detail="Invalid payment decision")
     now = utc_now()
-    next_status = "SUCCEEDED" if decision == "APPROVE" else "FAILED"
-    db.payments.update_one(
-        {"id": payment_id, "status": "PENDING"},
+    next_status = "APPROVED" if decision == "APPROVE" else "REJECTED"
+    claimed = db.payments.find_one_and_update(
+        {"id": payment_id, "status": {"$in": ["PENDING", "EXPIRED"]}},
         {
             "$set": {
                 "status": next_status,
@@ -298,10 +238,38 @@ def decide_payment(
                 "updatedAt": now,
             }
         },
+        return_document=ReturnDocument.AFTER,
     )
+    if not claimed:
+        current = db.payments.find_one({"id": payment_id})
+        if current and current.get("status") in {"SUCCEEDED", "APPROVED"}:
+            fulfill_payment(db, current, actor_admin_id=admin["id"])
+        return {
+            "id": payment_id,
+            "status": current.get("status") if current else "UNKNOWN",
+            "idempotent": True,
+        }
     if decision == "APPROVE":
-        _fulfill_payment(db, payment, admin["id"])
-    audit(db, f"MANUAL_PAYMENT_{decision}D", "PAYMENT", user["id"], admin["id"], payment_id, after={"status": next_status})
+        fulfill_payment(db, claimed, actor_admin_id=admin["id"])
+    metadata = payment.get("metadata") or {}
+    audit(
+        db,
+        f"MANUAL_PAYMENT_{decision}D",
+        "PAYMENT",
+        user["id"],
+        admin["id"],
+        payment_id,
+        after={
+            "status": next_status,
+            "amountMinor": payment["amountMinor"],
+            "currency": NAIRA_CURRENCY,
+            "planId": metadata.get("planId"),
+            "creditPackKey": metadata.get("creditPackKey"),
+            "paymentReference": payment.get("paymentReference"),
+            "reviewedAt": iso(now),
+            "reason": body.get("reason"),
+        },
+    )
     return {"id": payment_id, "status": next_status}
 
 
@@ -338,9 +306,11 @@ def admin_end_call(
     admin: dict = Depends(current_admin),
 ) -> dict:
     require_permission(admin, "calls:write")
-    request.app.state.db.call_rooms.update_one(
+    result = request.app.state.db.call_rooms.update_one(
         {"id": room_id}, {"$set": {"status": "ENDED", "endedAt": utc_now(), "updatedAt": utc_now()}}
     )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Call room not found")
     audit(request.app.state.db, "ADMIN_ENDED_CALL", "CALL_ROOM", user["id"], admin["id"], room_id, after={"reason": body.get("reason")})
     return {"ended": True}
 
@@ -381,9 +351,11 @@ def decide_face(
     if status not in {"APPROVED", "REJECTED", "QUARANTINED"}:
         raise HTTPException(status_code=422, detail="Invalid moderation status")
     now = utc_now()
-    request.app.state.db.face_profiles.update_one(
+    result = request.app.state.db.face_profiles.update_one(
         {"id": face_id}, {"$set": {"moderationStatus": status, "updatedAt": now}}
     )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Face profile not found")
     request.app.state.db.face_moderation_events.insert_one(
         {
             "id": str(uuid.uuid4()),
@@ -408,6 +380,12 @@ def admin_delete_face(
     admin: dict = Depends(current_admin),
 ) -> dict:
     require_permission(admin, "faces:write")
+    profile = request.app.state.db.face_profiles.find_one(
+        {"id": face_id, "deletedAt": None}
+    )
+    if not profile:
+        raise HTTPException(status_code=404, detail="Face profile not found")
+    purge_face_profile_data(request.app.state.db, profile)
     now = utc_now()
     request.app.state.db.face_profiles.update_one(
         {"id": face_id}, {"$set": {"active": False, "deletedAt": now, "updatedAt": now}}
@@ -438,9 +416,13 @@ def update_report(
 ) -> dict:
     require_permission(admin, "reports:write")
     status = str(body.get("status", ""))
-    request.app.state.db.abuse_reports.update_one(
+    if status not in {"OPEN", "INVESTIGATING", "RESOLVED", "DISMISSED"}:
+        raise HTTPException(status_code=422, detail="Invalid abuse-report status")
+    result = request.app.state.db.abuse_reports.update_one(
         {"id": report_id}, {"$set": {"status": status, "resolution": body.get("resolution"), "assignedAdminId": admin["id"], "updatedAt": utc_now()}}
     )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Abuse report not found")
     audit(request.app.state.db, "ABUSE_REPORT_UPDATED", "ABUSE_REPORT", user["id"], admin["id"], report_id, after={"status": status})
     return {"id": report_id, "status": status}
 
@@ -509,6 +491,7 @@ def update_plan(
         "groupCalls", "voiceEffects", "cloudGpu", "enabled",
     }
     changes = {key: value for key, value in body.items() if key in allowed}
+    changes["currency"] = NAIRA_CURRENCY
     changes["updatedAt"] = utc_now()
     result = request.app.state.db.plans.update_one({"id": plan_id}, {"$set": changes})
     if not result.matched_count:
@@ -545,17 +528,25 @@ def set_setting(
     admin: dict = Depends(current_admin),
 ) -> dict:
     require_permission(admin, "settings:write")
+    if namespace == "provider":
+        raise HTTPException(
+            status_code=403,
+            detail="Use Admin > Providers so credentials remain encrypted",
+        )
+    value = body.get("value", {})
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=422, detail="Setting value must be an object")
     now = utc_now()
     request.app.state.db.app_settings.update_one(
         {"namespace": namespace, "key": key},
         {
-            "$set": {"publicValue": body.get("value", {}), "updatedById": user["id"], "updatedAt": now},
+            "$set": {"publicValue": value, "updatedById": user["id"], "updatedAt": now},
             "$setOnInsert": {"id": str(uuid.uuid4()), "namespace": namespace, "key": key, "version": 1, "createdAt": now},
         },
         upsert=True,
     )
-    audit(request.app.state.db, "APP_SETTING_UPDATED", "APP_SETTING", user["id"], admin["id"], f"{namespace}/{key}", after={"keys": sorted((body.get("value") or {}).keys())})
-    return {"namespace": namespace, "key": key, "value": body.get("value", {})}
+    audit(request.app.state.db, "APP_SETTING_UPDATED", "APP_SETTING", user["id"], admin["id"], f"{namespace}/{key}", after={"keys": sorted(value.keys())})
+    return {"namespace": namespace, "key": key, "value": value}
 
 
 @router.get("/deployment")

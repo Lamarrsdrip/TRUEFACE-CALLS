@@ -1,76 +1,74 @@
 # Deploy TrueFace Calls On Emergent
 
-## Pull From GitHub
+## Import
 
 - Repository: `https://github.com/Lamarrsdrip/TRUEFACE-CALLS`
 - Branch: `codex/emergent-native`
+- Replace the current scaffold with the branch contents.
+- Keep the existing `frontend/` Next.js and `backend/` FastAPI folders.
+- Do not rewrite frameworks.
 
-This branch already matches Emergent's required architecture. Do not regenerate
-the application or convert frameworks during import.
+## Runtime Contract
 
-## Detection Contract
+- Frontend: `frontend`, port 3000
+- Backend: `backend/server.py`, exported app `app`, port 8001
+- API ingress: same-origin `/api`
+- Database: existing Emergent `MONGO_URL`, `DB_NAME=trueface`
+- Private files: MongoDB GridFS
 
-- Frontend directory: `frontend`
-- Backend directory: `backend`
-- FastAPI entrypoint: `backend/server.py`
-- Exported application: `app`
-- Backend port: `8001`
-- API prefix: `/api`
-- Database: Emergent-managed MongoDB
-- Private file storage: MongoDB GridFS
-
-Emergent's normal supervisor commands are sufficient. If it requests explicit
-commands:
+Commands, when Emergent asks for them:
 
 ```text
-Frontend install: npm install
+Frontend install: npm ci
 Frontend build: npm run build
 Frontend start: npm start
 Backend install: pip install -r requirements.txt
 Backend start: uvicorn server:app --host 0.0.0.0 --port 8001
 ```
 
-Run frontend commands inside `frontend/` and backend commands inside
-`backend/`.
+Run frontend commands in `frontend/` and backend commands in `backend/`.
 
-## Environment
-
-Set:
+## Required Environment
 
 ```text
-MONGO_URL=<Emergent MongoDB connection URL>
+MONGO_URL=<existing Emergent MongoDB URL>
 DB_NAME=trueface
-APP_URL=<Emergent public HTTPS URL>
-AUTH_SECRET=<unique random value of at least 32 characters>
+APP_URL=<public Emergent HTTPS URL>
+API_INTERNAL_URL=http://127.0.0.1:8001
+AUTH_SECRET=<unique random 32+ character value>
 SETTINGS_MASTER_KEY=<base64 of exactly 32 random bytes>
-BOOTSTRAP_ADMIN_EMAIL=<owner administrator email>
-BOOTSTRAP_ADMIN_PASSWORD=<new strong unique password>
+BOOTSTRAP_ADMIN_EMAIL=<owner email>
+BOOTSTRAP_ADMIN_PASSWORD=<strong temporary password>
 ```
 
-Do not add LiveKit, payment, email, storage or GPU secrets to frontend
-variables. Enter them after deployment through `/admin/providers`.
+Production startup intentionally fails when auth/vault secrets are missing or
+still use development defaults.
 
-## Acceptance
+## After Preview Starts
 
-Verify:
+1. Open `/api/health`.
+2. Sign in at `/admin/login`.
+3. Configure LiveKit in `/admin/providers`.
+4. Configure Manual Bank with bank name, account name and account number.
+5. Configure Gmail SMTP, custom SMTP or Resend.
+6. Optionally configure Paystack, Flutterwave, Emergent AI, GPU, monitoring or
+   WhatsApp.
+7. Configure plans and usage rates in the admin billing pages.
+8. Open `/system-check` and confirm call creation is ready.
 
-1. `/api/health` returns `status: ok` and `database: connected`.
-2. `/signup` creates a trial account.
-3. `/login` and `/admin/login` work.
-4. `/admin/providers` saves secrets as fingerprints and tests providers.
-5. `/admin/plans` loads all four seeded plans.
-6. `/create-call` creates a persistent room and distinct invite/host links.
-7. `/faces/upload` performs quality and consent checks.
-8. Manual bank payments remain pending until administrator approval.
-9. `/admin/system-health` identifies unconfigured external providers.
+## What Emergent Handles
 
-## External Accounts Needed Later
+- source import, preview and production hosting
+- frontend/backend process supervision
+- managed MongoDB
+- GridFS-backed private files for initial launch
+- HTTPS, environment values and platform logs
 
-- LiveKit Cloud or a compatible LiveKit server.
-- Stripe, Paystack and/or Flutterwave.
-- Transactional email or SMTP.
-- Optional S3/R2 storage if moving away from GridFS.
-- Optional RunPod, Modal, AWS, Replicate or custom GPU workers.
+## External Accounts
 
-The application must show `UNCONFIGURED` until a provider passes a real
-connection test. It must never simulate successful payments, calls or email.
+LiveKit is required for calls. Email is required for real verification and
+password reset. Paystack/Flutterwave are optional because reviewed manual bank
+payments work without them. Cloud AI/GPU is optional and not wired into the
+current browser media path.
+
+Do not report a provider as working until its real connection test passes.
