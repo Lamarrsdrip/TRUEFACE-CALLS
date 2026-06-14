@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from backend.app.invites import InviteSigner
 from backend.app.seed import seed_database
 from backend.app.serializers import utc_now
+from backend.app.vault import SecretVault
 from backend.server import create_app
 
 from .test_product_flows import csrf, signup
@@ -177,7 +178,7 @@ def test_call_creation_is_blocked_until_livekit_is_configured(
     assert response.json()["code"] == "LIVEKIT_NOT_CONFIGURED"
 
 
-def test_cloud_only_face_activation_reports_emergent_ai_missing(
+def test_cloud_only_face_activation_falls_back_to_local_when_gpu_is_missing(
     mongo_db, master_key
 ):
     client = TestClient(create_app(database=mongo_db, master_key=master_key))
@@ -217,5 +218,112 @@ def test_cloud_only_face_activation_reports_emergent_ai_missing(
         json={},
     )
 
-    assert response.status_code == 503
-    assert response.json()["code"] == "EMERGENT_AI_CREDITS_UNAVAILABLE"
+    assert response.status_code == 200
+    assert response.json()["processingMode"] == "browser"
+    assert response.json()["cloudAvailable"] is False
+    assert response.json()["fallbackReason"] == "GPU provider not configured"
+
+
+def test_cloud_preference_without_gpu_does_not_block_call_readiness(
+    mongo_db, master_key
+):
+    client = TestClient(create_app(database=mongo_db, master_key=master_key))
+    signup(client)
+    mongo_db.app_settings.insert_one(
+        {
+            "namespace": "provider",
+            "key": "ai",
+            "publicValue": {
+                "enabled": "true",
+                "provider": "emergent",
+                "mode": "cloud",
+            },
+            "encryptedValue": {},
+            "secretFingerprint": {},
+        }
+    )
+
+    readiness = client.get("/api/system/readiness").json()
+
+    assert readiness["checks"]["browserAi"]["status"] == "READY"
+    assert readiness["checks"]["cloudAi"]["status"] == "MISSING"
+    assert readiness["checks"]["cloudAi"]["requiredForCalls"] is False
+
+
+def test_cloud_activation_requires_configured_and_healthy_gpu(
+    mongo_db, master_key
+):
+    client = TestClient(create_app(database=mongo_db, master_key=master_key))
+    headers = signup(client)
+    user = mongo_db.users.find_one({"email": "user@example.com"})
+    now = utc_now()
+    vault = SecretVault(master_key)
+    mongo_db.app_settings.insert_many(
+        [
+            {
+                "namespace": "provider",
+                "key": "ai",
+                "publicValue": {
+                    "enabled": "true",
+                    "provider": "emergent",
+                    "mode": "cloud",
+                },
+                "encryptedValue": {},
+                "secretFingerprint": {},
+            },
+            {
+                "namespace": "provider",
+                "key": "gpu",
+                "publicValue": {
+                    "enabled": "true",
+                    "provider": "custom",
+                    "endpoint": "https://gpu.example/process",
+                    "photorealistic": "false",
+                },
+                "encryptedValue": {
+                    "apiKey": vault.encrypt("gpu-secret"),
+                },
+                "secretFingerprint": {
+                    "apiKey": vault.fingerprint("gpu-secret"),
+                },
+            },
+        ]
+    )
+    mongo_db.provider_health.insert_one(
+        {
+            "provider": "gpu",
+            "status": "OPERATIONAL",
+            "details": {
+                "capabilities": {
+                    "realtime": True,
+                    "photorealistic": False,
+                }
+            },
+            "checkedAt": now,
+            "updatedAt": now,
+        }
+    )
+    mongo_db.face_profiles.insert_one(
+        {
+            "id": "cloud-face",
+            "userId": user["id"],
+            "objectKey": "faces/cloud.jpg",
+            "active": True,
+            "moderationStatus": "APPROVED",
+            "consentRevokedAt": None,
+            "deletedAt": None,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )
+
+    response = client.post(
+        "/api/faces/cloud-face/activate",
+        headers=headers,
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["processingMode"] == "cloud"
+    assert response.json()["cloudAvailable"] is True
+    assert response.json()["cloudPhotorealistic"] is False

@@ -8,10 +8,12 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from gridfs import GridFS
 
+from ..ai_providers import EmergentLlmClient
 from ..entitlements import current_entitlement
 from ..errors import api_error
 from ..face_storage import purge_face_profile_data
 from ..provider_policy import apply_provider_defaults
+from ..provider_policy import CONFIGURED, provider_configuration_status
 from ..routers.providers import provider_values
 from ..security import current_user
 from ..serializers import iso, json_safe, utc_now
@@ -47,8 +49,47 @@ def _readiness(images: list[dict]) -> tuple[int, str]:
 
 
 @router.post("/faces/quality-check")
-def quality_check(body: dict, _user: dict = Depends(current_user)) -> dict:
-    return _quality(body)
+def quality_check(
+    body: dict, request: Request, _user: dict = Depends(current_user)
+) -> dict:
+    result = _quality(body)
+    client = EmergentLlmClient(provider_values(request, "ai"))
+    if client.configured:
+        try:
+            result["aiGuidance"] = client.complete_json(
+                system_prompt=(
+                    "You are the TrueFace image-quality assistant. Explain the "
+                    "deterministic biometric-photo checks in plain language. "
+                    "Never identify a person. Return JSON with summary and a "
+                    "recommendations array. Do not claim to run face-swap inference."
+                ),
+                payload={
+                    "deterministicScore": result["score"],
+                    "passed": result["passed"],
+                    "checks": result["checks"],
+                    "imageMetadata": {
+                        "width": int(body.get("width", 0)),
+                        "height": int(body.get("height", 0)),
+                        "faceCount": int(
+                            body.get("faceCount", body.get("faces", 0))
+                        ),
+                        "sharpness": float(
+                            body.get("sharpness", body.get("blurScore", 0))
+                        ),
+                        "brightness": float(body.get("brightness", 0)),
+                        "faceCoverage": float(body.get("faceCoverage", 0)),
+                    },
+                },
+            )
+        except Exception:
+            result["aiGuidance"] = {
+                "summary": "Deterministic quality checks completed.",
+                "recommendations": [
+                    "Use a clear, well-lit image with one front-facing person."
+                ],
+                "status": "Emergent LLM guidance unavailable",
+            }
+    return result
 
 
 @router.post("/faces/upload-url")
@@ -314,25 +355,22 @@ def activate_face(
             "AI_PROVIDER_NOT_CONFIGURED",
             "AI provider not configured",
         )
-    processing_mode = ai_values.get("mode", "hybrid")
-    if processing_mode == "cloud":
-        if not ai_values.get("gatewayUrl") or not ai_values.get("universalKey"):
-            raise api_error(
-                503,
-                "EMERGENT_AI_CREDITS_UNAVAILABLE",
-                "Emergent AI credits unavailable",
-            )
-        health = request.app.state.db.provider_health.find_one(
-            {"provider": "ai", "status": "OPERATIONAL"}
-        )
-        if not health or not (health.get("details") or {}).get(
-            "realtimeFaceVideo"
-        ):
-            raise api_error(
-                503,
-                "CLOUD_FACE_PROCESSING_UNAVAILABLE",
-                "Emergent AI does not currently report real-time face-video processing capability",
-            )
+    processing_mode = ai_values.get("mode", "browser")
+    gpu_values = provider_values(request, "gpu")
+    gpu_configured = (
+        provider_configuration_status("gpu", gpu_values) == CONFIGURED
+    )
+    gpu_health = request.app.state.db.provider_health.find_one(
+        {"provider": "gpu"}
+    )
+    cloud_available = bool(
+        gpu_configured
+        and gpu_health
+        and gpu_health.get("status") == "OPERATIONAL"
+    )
+    gpu_capabilities = ((gpu_health or {}).get("details") or {}).get(
+        "capabilities", {}
+    )
     profile = request.app.state.db.face_profiles.find_one(
         {
             "id": profile_id,
@@ -348,7 +386,26 @@ def activate_face(
     return {
         "faceImageUrl": _signed_download(request, profile["objectKey"]),
         "processingMode": (
-            "browser" if processing_mode in {"browser", "hybrid"} else "cloud"
+            "cloud"
+            if processing_mode == "cloud" and cloud_available
+            else "browser"
+        ),
+        "cloudAvailable": cloud_available,
+        "cloudPhotorealistic": bool(
+            str(gpu_values.get("photorealistic", "false")).lower() == "true"
+            or (
+                isinstance(gpu_capabilities, dict)
+                and gpu_capabilities.get("photorealistic")
+            )
+        ),
+        "fallbackReason": (
+            None
+            if cloud_available
+            else (
+                "GPU provider not configured"
+                if not gpu_configured
+                else "GPU provider is not healthy or has not been tested"
+            )
         ),
     }
 

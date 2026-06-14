@@ -12,8 +12,8 @@
 
 Verified on June 14, 2026:
 
-- Backend: `54 passed`.
-- Frontend: `16 passed`.
+- Backend: `63 passed`.
+- Frontend: `20 passed`.
 - TypeScript: passed.
 - Production build: passed; `47` routes generated.
 - Frontend production dependencies: `0` known vulnerabilities.
@@ -42,3 +42,7 @@ Verified on June 14, 2026:
 Until items 5-9 are closed, this is a production-oriented SaaS foundation,
 not a claim that the full photorealistic AI service is ready for unrestricted
 public sale.
+
+Local enhanced face masking remains launch-capable without item 7. Missing GPU
+settings are reported as optional and never block call creation or normal
+LiveKit video.

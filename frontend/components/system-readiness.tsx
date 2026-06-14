@@ -28,14 +28,22 @@ export function SystemReadiness({ compact = false }: { compact?: boolean }) {
     const webgl = Boolean(
       canvas.getContext("webgl2") || canvas.getContext("webgl"),
     );
+    const webgpu = "gpu" in (navigator as Navigator & { gpu?: unknown });
+    const canvas2d = Boolean(canvas.getContext("2d"));
+    const capture = typeof canvas.captureStream === "function";
     const media = Boolean(navigator.mediaDevices?.getUserMedia);
     const wasm = typeof WebAssembly !== "undefined";
-    const ready = webgl && media && wasm;
+    const ready = canvas2d && capture && media && wasm;
+    const backend = webgpu
+      ? "WebGPU acceleration"
+      : webgl
+        ? "WebGL acceleration"
+        : "Canvas 2D fallback";
     setBrowserCheck({
       ready,
       message: ready
-        ? "This device supports camera access, WebAssembly, and WebGL browser processing."
-        : "This browser is missing camera, WebAssembly, or WebGL support; use a newer browser or stronger device.",
+        ? `Local mode is ready with ${backend}; no cloud GPU is required.`
+        : "This browser is missing camera, WebAssembly, Canvas 2D, or canvas video capture support. Calls still restore the raw camera with a warning if processing cannot start.",
     });
   }, []);
   if (resource.loading) return <LoadingState label="Checking call services" />;
@@ -63,8 +71,9 @@ export function SystemReadiness({ compact = false }: { compact?: boolean }) {
             key === "browserAi" && browserCheck
               ? {
                   ...serverCheck,
-                  status: browserCheck.ready ? ("READY" as const) : ("MISSING" as const),
-                  message: browserCheck.message,
+                  message: browserCheck.ready
+                    ? browserCheck.message
+                    : `${serverCheck.message} Device warning: ${browserCheck.message}`,
                 }
               : serverCheck;
           return (
@@ -108,8 +117,8 @@ export function SystemReadiness({ compact = false }: { compact?: boolean }) {
 function label(value: string) {
   if (value === "livekit") return "LiveKit";
   if (value === "ai") return "AI";
-  if (value === "browserAi") return "Browser AI";
-  if (value === "emergentAi") return "Emergent AI";
-  if (value === "cloudAi") return "Cloud face processing";
+  if (value === "browserAi") return "Local mode";
+  if (value === "emergentAi") return "Emergent LLM";
+  if (value === "cloudAi") return "GPU face processing";
   return value.charAt(0).toUpperCase() + value.slice(1);
 }

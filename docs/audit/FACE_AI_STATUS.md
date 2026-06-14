@@ -11,6 +11,12 @@
 - Tracking degradation can pause AI output.
 - Device-aware low, standard, and HD quality profiles exist.
 - Multi-image face profiles are validated, privately stored, and scored.
+- Local processing is the default and needs no cloud GPU provider.
+- Local initialization selects WebGPU/WebGL capability where available,
+  falls back to CPU-backed MediaPipe plus Canvas 2D, and restores the raw
+  camera with a visible warning only if processed canvas output cannot start.
+- The authenticated cloud frame gateway and processed canvas publication are
+  implemented for compatible external GPU workers.
 
 ## What Is Not Yet Full GPU Face Replacement
 
@@ -36,7 +42,20 @@ Default product mode is phone/browser-local processing:
 - Standard Mode: 480p stable mobile output.
 - High Mode: 720p when device capability allows.
 
-Cloud UI status remains **Unavailable / provider not configured** until a real
-realtime GPU worker reports healthy face-video capability. Emergent LLM or
-universal credits by themselves do not provide a realtime video inference
-worker.
+Cloud UI status remains **Unavailable / GPU not configured** until a real GPU
+worker passes its health check. Selecting cloud preference without a working
+GPU automatically resolves to local enhanced face mask and does not block call
+creation. Emergent LLM or universal credits by themselves do not provide a
+realtime video inference worker.
+
+## Emergent LLM Role
+
+Emergent LLM is optional and is used only for:
+
+- metadata-only face quality explanations
+- provider and fallback recommendations
+- admin AI diagnostics
+- human-readable error guidance
+
+It does not receive live frames by default and is never used as the actual
+face-swap engine.

@@ -15,6 +15,11 @@
 - Browser MediaPipe tracking, smoothed face-oval compositing, adaptive local
   lighting, blink/jaw-responsive geometry, processed canvas publication,
   visible local-mask disclosure, tracking-loss pause and raw-camera restoration.
+- Optional authenticated cloud frame gateway, normalized GPU-worker contract,
+  processed cloud canvas publication, health checks, and automatic local
+  fallback when the worker is absent or fails.
+- Optional Emergent LLM metadata-only quality guidance, provider diagnostics,
+  fallback recommendations, and human-readable error explanations.
 - Persisted gender and default voice preferences plus a real browser
   AudioWorklet tone processor that publishes transformed microphone audio.
 - Advisory phone recommendations and an automatic browser/device/FPS/camera

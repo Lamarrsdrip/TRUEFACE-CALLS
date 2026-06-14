@@ -146,8 +146,8 @@ const definitions: Record<string, Definition> = {
   },
   ai: {
     label: "AI",
-    required: true,
-    description: "Controls face replacement and enhancement processing. The launch path is browser-first, with Emergent AI as an optional cloud fallback.",
+    required: false,
+    description: "Emergent LLM handles provider reasoning, quality guidance, fallback explanations, and diagnostics. It does not transform video frames.",
     fields: [
       {
         key: "enabled",
@@ -158,41 +158,53 @@ const definitions: Record<string, Definition> = {
       },
       {
         key: "provider",
-        label: "Cloud AI provider",
-        helper: "Emergent AI is the default universal-credit adapter. Browser processing does not consume these credits.",
+        label: "Reasoning provider",
+        helper: "Emergent LLM is used for orchestration and diagnostics. Browser processing does not consume LLM credits.",
         type: "select",
         options: [
-          { value: "emergent", label: "Emergent AI" },
+          { value: "emergent", label: "Emergent LLM" },
         ],
       },
-      { key: "mode", label: "Processing mode", helper: "Hybrid uses the device first and checks Emergent AI only when a compatible cloud capability exists.", type: "select", options: [
-        { value: "browser", label: "Browser" },
-        { value: "cloud", label: "Cloud" },
-        { value: "hybrid", label: "Hybrid (recommended)" },
+      { key: "mode", label: "Face processing policy", helper: "Local uses the device. Cloud requires the separate GPU provider. Hybrid stays local-first and exposes cloud only when its worker is healthy.", type: "select", options: [
+        { value: "browser", label: "Local browser/device (recommended)" },
+        { value: "cloud", label: "Cloud GPU with local fallback" },
+        { value: "hybrid", label: "Hybrid, local-first" },
       ] },
-      { key: "gatewayUrl", label: "Emergent AI gateway URL", helper: "Usually injected by Emergent. Leave blank when the platform has not supplied a deploy-time AI gateway.", show: cloudAi },
-      { key: "universalKey", label: "Emergent universal key", helper: "Usually injected as a deployment secret. Any admin value is encrypted and overrides the environment fallback.", secret: true, show: cloudAi },
-      { key: "healthPath", label: "Health path", helper: "Gateway path that reports access, credits, and capabilities. Default: /health.", show: cloudAi },
-      { key: "creditsPath", label: "Credits path", helper: "Reserved for a separate Emergent credit-balance endpoint when provided. Default: /credits.", show: cloudAi },
-      { key: "estimatedNairaPerMinute", label: "Estimated cloud cost per minute (₦)", helper: "Optional internal estimate used for pricing; it does not charge customers by itself.", type: "number", show: cloudAi },
+      { key: "gatewayUrl", label: "Emergent LLM base URL", helper: "Optional. The base URL supplied by Emergent for the universal LLM/credits API." },
+      { key: "universalKey", label: "Emergent LLM API key", helper: "Optional and stored encrypted. This key is never sent to the browser or GPU worker.", secret: true },
+      { key: "model", label: "LLM model", helper: "Default: emergent-universal. Change only when Emergent supplies a different model name." },
+      { key: "chatPath", label: "Chat completion path", helper: "OpenAI-compatible JSON chat path. Default: /chat/completions." },
+      { key: "healthPath", label: "Access and credits health path", helper: "Endpoint used by Test connection. Default: /health." },
+      { key: "creditsPath", label: "Credits path", helper: "Optional separate Emergent credit-balance endpoint. Default: /credits." },
+      { key: "estimatedNairaPerMinute", label: "Estimated LLM cost per AI minute (₦)", helper: "Internal pricing estimate only. Actual video inference cost belongs under GPU.", type: "number" },
     ],
   },
   gpu: {
     label: "GPU",
     required: false,
-    description: "Future paid cloud processing through RunPod, Modal, AWS, Replicate, or a custom worker.",
+    description: "Actual cloud image/video inference. Configure a worker that implements the normalized TrueFace frame contract.",
     fields: [
+      { key: "enabled", label: "Cloud face processing", helper: "Enable only after the worker endpoint is deployed and tested.", type: "select", options: yesNo },
       { key: "provider", label: "GPU provider", helper: "Choose the service hosting your worker.", type: "select", options: [
         { value: "runpod", label: "RunPod" },
         { value: "modal", label: "Modal" },
-        { value: "aws", label: "AWS GPU" },
         { value: "replicate", label: "Replicate" },
         { value: "custom", label: "Custom worker" },
       ] },
-      { key: "endpoint", label: "Worker endpoint", helper: "HTTPS endpoint for the GPU worker." },
-      { key: "apiKey", label: "API key", helper: "Encrypted provider credential.", secret: true },
+      { key: "endpoint", label: "GPU inference URL", helper: "HTTPS POST endpoint implementing the TrueFace process-frame request and response contract." },
+      { key: "healthEndpoint", label: "Worker health URL", helper: "Optional GET endpoint. When blank, the inference URL is used for the connection test." },
+      { key: "apiKey", label: "GPU inference API key", helper: "Encrypted and sent only from the backend as a Bearer token.", secret: true },
       { key: "region", label: "Region", helper: "Optional provider region." },
       { key: "model", label: "Worker/model name", helper: "Optional deployment identifier." },
+      { key: "timeoutSeconds", label: "Frame timeout (seconds)", helper: "Between 2 and 30 seconds. Realtime calls need a much lower actual latency.", type: "number" },
+      { key: "maxFramesPerSecond", label: "Maximum inference FPS", helper: "Advisory worker limit. The browser HTTPS gateway currently sends 2 frames per second.", type: "number" },
+      { key: "fallbackMode", label: "Failure fallback", helper: "Local processing is the safe supported fallback.", type: "select", options: [
+        { value: "local", label: "Local enhanced face mask" },
+      ] },
+      { key: "photorealistic", label: "Verified worker capability", helper: "Mark photorealistic only after your deployed model has been tested. This changes disclosure copy, not model behavior.", type: "select", options: [
+        { value: "false", label: "Not verified photorealistic" },
+        { value: "true", label: "Verified photorealistic" },
+      ] },
     ],
   },
   "manual-bank": {
@@ -300,6 +312,36 @@ export function AdminProviders() {
     }
   }
 
+  async function diagnoseAi() {
+    setBusy(true);
+    try {
+      const result = await apiFetch<{
+        recommendedMode?: string;
+        summary?: string;
+        actions?: string[];
+      }>("/admin/providers/ai/diagnostics", {
+        method: "POST",
+        ...jsonBody({}),
+      });
+      const actions = Array.isArray(result.actions)
+        ? ` Next: ${result.actions.join(" ")}`
+        : "";
+      setMessage(
+        `${result.summary ?? "AI diagnostics completed."}${
+          result.recommendedMode
+            ? ` Recommended mode: ${result.recommendedMode}.`
+            : ""
+        }${actions}`,
+      );
+    } catch (value) {
+      setMessage(
+        value instanceof Error ? value.message : "AI diagnostics failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -356,7 +398,12 @@ export function AdminProviders() {
           ) : null}
           {selected === "ai" ? (
             <div className="notice notice-info">
-              Browser mode performs tracking and the current face overlay on the device with no cloud key. Emergent AI access is checked separately and is only considered a cloud fallback when its gateway reports real-time face-video capability. General LLM credits alone cannot process a live video stream.
+              Local mode performs MediaPipe tracking and the enhanced face mask on the device with no cloud key. Emergent LLM helps explain quality and provider status, but only the separately configured GPU worker transforms cloud video frames.
+            </div>
+          ) : null}
+          {selected === "gpu" ? (
+            <div className="notice notice-warning">
+              A RunPod, Modal, Replicate, or custom account is not enough by itself. Deploy a compatible inference worker at the URL above. Until its health check passes, calls use the local enhanced face mask.
             </div>
           ) : null}
           {message ? <div className="notice notice-info">{message}</div> : null}
@@ -400,6 +447,16 @@ export function AdminProviders() {
               {selected === "email" ? <MailCheck size={17} /> : null}
               {selected === "email" ? "Send test email" : "Test connection"}
             </button>
+            {selected === "ai" ? (
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => void diagnoseAi()}
+                disabled={busy}
+              >
+                Run AI diagnostics
+              </button>
+            ) : null}
           </div>
           <p className="provider-fallback-note">
             “Environment variables remain a fallback” means the backend may use deployment secrets until you save an encrypted admin value. Once saved, the admin value takes priority.
@@ -471,10 +528,6 @@ function externalStorage(values: Record<string, unknown>) {
 
 function customSmtp(values: Record<string, unknown>) {
   return values.provider === "smtp";
-}
-
-function cloudAi(values: Record<string, unknown>) {
-  return values.mode !== "browser";
 }
 
 function statusLabel(status?: Provider["configurationStatus"]) {

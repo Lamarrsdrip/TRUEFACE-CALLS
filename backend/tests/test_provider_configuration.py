@@ -29,9 +29,9 @@ def test_provider_list_excludes_stripe_and_reports_gridfs_configured(
     assert "stripe" not in by_key
     assert by_key["storage"]["configurationStatus"] == "CONFIGURED"
     assert by_key["storage"]["values"]["provider"] == "gridfs"
-    assert by_key["ai"]["configurationStatus"] == "PARTIALLY_CONFIGURED"
+    assert by_key["ai"]["configurationStatus"] == "CONFIGURED"
     assert by_key["ai"]["values"]["provider"] == "emergent"
-    assert by_key["ai"]["values"]["mode"] == "hybrid"
+    assert by_key["ai"]["values"]["mode"] == "browser"
 
 
 def test_gmail_email_configuration_moves_from_partial_to_configured(
@@ -183,23 +183,33 @@ def test_browser_ai_connection_test_needs_no_cloud_key(mongo_db, master_key):
     assert saved.status_code == 200
     assert tested.status_code == 200
     assert tested.json()["status"] == "OPERATIONAL"
-    assert "does not require an API key" in tested.json()["message"]
+    assert "needs no cloud key" in tested.json()["message"]
 
 
-def test_emergent_ai_environment_is_used_without_exposing_universal_key(
+def test_emergent_llm_environment_is_used_without_exposing_api_key(
     mongo_db, master_key, monkeypatch
 ):
-    monkeypatch.setenv("EMERGENT_AI_GATEWAY_URL", "https://ai.emergent.example")
-    monkeypatch.setenv("EMERGENT_AI_UNIVERSAL_KEY", "emergent-secret")
+    monkeypatch.setenv("EMERGENT_LLM_BASE_URL", "https://llm.emergent.example")
+    monkeypatch.setenv("EMERGENT_LLM_API_KEY", "emergent-secret")
+    monkeypatch.setenv("AI_FACE_PROVIDER", "cloud")
+    monkeypatch.setenv("GPU_PROVIDER", "runpod")
+    monkeypatch.setenv("GPU_INFERENCE_URL", "https://gpu.example/process")
+    monkeypatch.setenv("GPU_INFERENCE_API_KEY", "gpu-secret")
     client, _headers = logged_in_admin(mongo_db, master_key)
 
     providers = client.get("/api/admin/providers").json()
     ai = next(item for item in providers if item["provider"] == "ai")
+    gpu = next(item for item in providers if item["provider"] == "gpu")
 
     assert ai["configurationStatus"] == "CONFIGURED"
-    assert ai["values"]["gatewayUrl"] == "https://ai.emergent.example"
+    assert ai["values"]["gatewayUrl"] == "https://llm.emergent.example"
+    assert ai["values"]["mode"] == "cloud"
     assert "universalKey" not in ai["values"]
     assert ai["secrets"]["universalKey"].startswith("sha256:")
+    assert gpu["configurationStatus"] == "CONFIGURED"
+    assert gpu["values"]["provider"] == "runpod"
+    assert gpu["values"]["endpoint"] == "https://gpu.example/process"
+    assert gpu["secrets"]["apiKey"].startswith("sha256:")
 
 
 def test_emergent_ai_test_records_credit_and_realtime_capabilities(

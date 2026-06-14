@@ -18,6 +18,7 @@ from pymongo import MongoClient, ReturnDocument
 try:
     from .app.config import Settings
     from .app.routers.admin import router as admin_router
+    from .app.routers.ai_face import router as ai_face_router
     from .app.routers.auth import router as auth_router
     from .app.routers.billing import router as billing_router
     from .app.routers.credits import router as credits_router
@@ -33,6 +34,7 @@ try:
 except ImportError:
     from app.config import Settings
     from app.routers.admin import router as admin_router
+    from app.routers.ai_face import router as ai_face_router
     from app.routers.auth import router as auth_router
     from app.routers.billing import router as billing_router
     from app.routers.credits import router as credits_router
@@ -249,6 +251,7 @@ def create_app(database=None, master_key: str | None = None) -> FastAPI:
         }
 
     application.include_router(auth_router)
+    application.include_router(ai_face_router)
     application.include_router(providers_router)
     application.include_router(credits_router)
     application.include_router(billing_router)

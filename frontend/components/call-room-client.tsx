@@ -37,6 +37,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch, jsonBody } from "../lib/api";
 import { BrowserFaceSession } from "../lib/browser-face-session";
+import { CloudFaceSession } from "../lib/cloud-face-session";
 import {
   BrowserVoiceSession,
   browserVoiceSupport,
@@ -89,6 +90,10 @@ interface AccountSession {
     voiceEffects: boolean;
     allowedQualities: string[];
   };
+}
+
+interface FaceProcessingSession {
+  stop(): void;
 }
 
 export function CallRoomClient({ slug }: { slug: string }) {
@@ -483,7 +488,7 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
     WaitingParticipant[]
   >([]);
   const [hostMessage, setHostMessage] = useState<string | null>(null);
-  const aiSession = useRef<BrowserFaceSession | null>(null);
+  const aiSession = useRef<FaceProcessingSession | null>(null);
   const rawTrack = useRef<LocalVideoTrack | null>(null);
   const processedTrack = useRef<LocalVideoTrack | null>(null);
   const voiceSession = useRef<BrowserVoiceSession | null>(null);
@@ -746,16 +751,18 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       const activation = await apiFetch<{
         faceImageUrl: string;
         processingMode: "browser" | "cloud";
+        cloudAvailable: boolean;
+        cloudPhotorealistic?: boolean;
+        fallbackReason?: string | null;
       }>(
         `/faces/${selectedFace}/activate`,
         { method: "POST", ...jsonBody({}) },
       );
-      const modeStatus = processingStatus(activation.processingMode, false);
-      if (!modeStatus.available || activation.processingMode === "cloud") {
-        throw new Error(
-          "Cloud AI face swap is unavailable until a realtime GPU worker is connected",
-        );
-      }
+      const modeStatus = processingStatus(
+        activation.processingMode,
+        activation.cloudAvailable,
+        activation.cloudPhotorealistic === true,
+      );
       setProcessingLabel(modeStatus.label);
       const publication = room.localParticipant.getTrackPublication(
         Track.Source.Camera,
@@ -766,17 +773,117 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
       }
       rawTrack.current = localTrack;
       const sourceTrack = localTrack.mediaStreamTrack;
-      const session = new BrowserFaceSession({
-        sourceTrack,
-        faceImageUrl: activation.faceImageUrl,
-        quality,
-        onTrackingState: setTrackingState,
-        onFrameTime: (frameTime) => {
-          if (frameTime > 80 && quality !== "low") setQuality("low");
-        },
-      });
-      const browserTrack = await session.start();
-      const nextProcessed = new LocalVideoTrack(browserTrack);
+      let session: FaceProcessingSession;
+      let mediaTrack: MediaStreamTrack;
+      let activeMode = activation.processingMode;
+      let cloudSession: CloudFaceSession | null = null;
+      let cloudFallbackStarted = false;
+      const browserSession = () =>
+        new BrowserFaceSession({
+          sourceTrack,
+          faceImageUrl: activation.faceImageUrl,
+          quality,
+          onTrackingState: setTrackingState,
+          onFrameTime: (frameTime) => {
+            if (frameTime > 80 && quality !== "low") setQuality("low");
+          },
+          onBackend: (backend) => {
+            const suffix =
+              backend === "webgpu"
+                ? "WebGPU"
+                : backend === "webgl"
+                  ? "WebGL"
+                  : "Canvas 2D";
+            setProcessingLabel(`Local enhanced face mask · ${suffix}`);
+          },
+        });
+      const switchRunningCloudToLocal = async (reason: string) => {
+        if (
+          cloudFallbackStarted ||
+          !cloudSession ||
+          aiSession.current !== cloudSession
+        ) {
+          return;
+        }
+        cloudFallbackStarted = true;
+        try {
+          const localSession = browserSession();
+          const localMediaTrack = await localSession.start();
+          const localProcessedTrack = new LocalVideoTrack(localMediaTrack);
+          if (processedTrack.current) {
+            await room.localParticipant.unpublishTrack(
+              processedTrack.current,
+              true,
+            );
+          }
+          await room.localParticipant.publishTrack(localProcessedTrack, {
+            source: Track.Source.Camera,
+            name: "local-face-mask-fallback",
+          });
+          cloudSession.stop();
+          aiSession.current = localSession;
+          processedTrack.current = localProcessedTrack;
+          setProcessingLabel(processingStatus("browser", false).label);
+          setTrackingState("tracking");
+          setError(
+            `${reason}. Cloud processing stopped; local enhanced face mask is active.`,
+          );
+        } catch (fallbackError) {
+          setError(
+            fallbackError instanceof Error
+              ? `${fallbackError.message}. AI mode was stopped.`
+              : "Cloud and local face processing are unavailable.",
+          );
+          await disableAi();
+        }
+      };
+      if (activation.processingMode === "cloud") {
+        cloudSession = new CloudFaceSession({
+          sourceTrack,
+          faceProfileId: selectedFace,
+          roomId: roomInfo.id,
+          quality,
+          onTrackingState: setTrackingState,
+          onFrameTime: (frameTime) => {
+            if (frameTime > 1_500) {
+              setError(
+                "Cloud processing latency is high. Local mode may be smoother on this connection.",
+              );
+            }
+          },
+          onProviderFailure: (reason) => {
+            void switchRunningCloudToLocal(reason);
+          },
+        });
+        try {
+          mediaTrack = await cloudSession.start();
+          session = cloudSession;
+        } catch (cloudError) {
+          cloudSession.stop();
+          activeMode = "browser";
+          const localSession = browserSession();
+          mediaTrack = await localSession.start();
+          session = localSession;
+          setProcessingLabel(processingStatus("browser", false).label);
+          setError(
+            `${
+              cloudError instanceof Error
+                ? cloudError.message
+                : "Cloud face processing is unavailable"
+            }. Local enhanced face mask is active instead.`,
+          );
+        }
+      } else {
+        const localSession = browserSession();
+        mediaTrack = await localSession.start();
+        session = localSession;
+        if (activation.fallbackReason) {
+          setError(
+            `${activation.fallbackReason}. Local enhanced face mask is active.`,
+          );
+        }
+      }
+      const nextProcessed = new LocalVideoTrack(mediaTrack);
       try {
         await replacePublishedTrack({
           async unpublishOriginal() {
@@ -785,7 +892,10 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
           async publishProcessed() {
             await room.localParticipant.publishTrack(nextProcessed, {
               source: Track.Source.Camera,
-              name: "local-face-mask",
+              name:
+                activeMode === "cloud"
+                  ? "cloud-ai-face-swap"
+                  : "local-face-mask",
             });
           },
           async restoreOriginal() {

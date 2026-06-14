@@ -11,7 +11,8 @@ flowchart LR
   F --> E["Gmail SMTP / SMTP / Resend"]
   B --> A["MediaPipe + Canvas local enhanced mask"]
   B --> V["Web Audio AudioWorklet voice tone"]
-  F -. future .-> C["Emergent AI or GPU worker"]
+  F -. optional metadata .-> L["Emergent LLM orchestration"]
+  F -. optional frames .-> C["TrueFace gateway -> GPU worker"]
 ```
 
 MongoDB stores users, sessions, plans, subscriptions, wallets, ledger entries,

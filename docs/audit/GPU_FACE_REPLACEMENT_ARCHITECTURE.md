@@ -1,54 +1,72 @@
 # GPU Face Replacement Architecture
 
-## Provider Abstraction
+## Default Local Path
 
-The GPU provider contract should support:
+Camera -> MediaPipe Face Landmarker -> browser acceleration where available ->
+Canvas 2D compositing -> processed `MediaStreamTrack` -> LiveKit.
 
-- RunPod.
-- Modal.
-- AWS GPU.
-- Lambda Labs.
-- Replicate.
-- Custom HTTPS/WebRTC GPU worker endpoint.
+The raw camera publication is removed before the processed track is published.
+If processing cannot start, the app restores the raw camera and shows a
+warning. No cloud account is required.
 
-Admin settings:
+## Optional Cloud Path
 
-- provider name.
-- endpoint URL.
-- API key.
-- model name and version.
-- quality mode.
-- cost per minute.
-- enabled/disabled.
-- test connection.
+Camera frame -> `POST /api/ai/face/process-frame` -> authenticated backend
+gateway -> configured GPU worker -> processed image -> browser canvas track ->
+LiveKit.
 
-## Modes
+The backend verifies:
 
-- Browser Mode: local phone/laptop processing.
-- HD GPU Mode: cloud-enhanced 720p.
-- Ultra GPU Mode: business-tier high fidelity and higher credit burn.
+- signed-in user
+- approved room participation
+- owned and approved face profile
+- room availability
+- image data URL type, signature, and size
+- configured encrypted GPU credentials
 
-## Pipeline
+Frames are handled in memory and are not stored.
 
-Camera frame -> frame encoder -> GPU endpoint -> processed frame ->
-browser compositor/decoder -> LiveKit processed track.
+## Worker Contract
 
-The raw camera track must remain unpublished while AI mode is active. If GPU
-latency, dropped frames, or provider errors exceed policy thresholds, the room
-falls back to Browser Mode and records a provider health event.
+`GPU_INFERENCE_URL` receives a Bearer-authenticated JSON POST:
 
-## Metrics
+```json
+{
+  "frame": "data:image/jpeg;base64,...",
+  "faceProfileId": "profile-id",
+  "faceProfileImage": "data:image/jpeg;base64,...",
+  "qualityMode": "standard",
+  "roomId": "room-id",
+  "requestId": "request-id"
+}
+```
 
-- GPU latency.
-- FPS.
-- dropped frames.
-- processing time.
-- error rate.
-- cost per minute.
-- credit charge per minute.
+Expected response:
 
-## Billing
+```json
+{
+  "processedFrame": "data:image/jpeg;base64,...",
+  "latencyMs": 120,
+  "providerStatus": "OPERATIONAL",
+  "capabilities": {
+    "realtime": true,
+    "photorealistic": false
+  }
+}
+```
 
-GPU mode uses the same server-authoritative credit engine. Browser clients can
-request GPU mode, but the API decides availability, rate, plan entitlement,
-and reservation size.
+RunPod, Modal, Replicate, or custom infrastructure should be placed behind
+this contract. The provider account alone is insufficient; a model worker or
+adapter must be deployed.
+
+## Health
+
+`GET /api/ai/face/provider-health` reports:
+
+- local mode availability
+- Emergent LLM configuration and last test state
+- GPU configuration, active health result, capabilities, and latency
+- effective local/cloud mode
+
+Missing or unhealthy GPU configuration returns local mode and
+`Unavailable / provider not configured`. It does not break calls.

@@ -13,6 +13,20 @@ export interface BrowserFaceSessionOptions {
   quality: "low" | "standard" | "hd";
   onTrackingState(state: "tracking" | "degraded" | "paused"): void;
   onFrameTime(milliseconds: number): void;
+  onBackend?(backend: LocalProcessingBackend): void;
+}
+
+export type LocalProcessingBackend = "webgpu" | "webgl" | "canvas2d" | "raw";
+
+export function localBackendForCapabilities(capabilities: {
+  webGpu: boolean;
+  webGl: boolean;
+  canvas2d: boolean;
+}): LocalProcessingBackend {
+  if (capabilities.webGpu) return "webgpu";
+  if (capabilities.webGl) return "webgl";
+  if (capabilities.canvas2d) return "canvas2d";
+  return "raw";
 }
 
 const profiles = {
@@ -54,14 +68,30 @@ export class BrowserFaceSession {
 
   async start(): Promise<MediaStreamTrack> {
     await this.video.play();
+    const capabilityCanvas = document.createElement("canvas");
+    const backend = localBackendForCapabilities({
+      webGpu:
+        typeof navigator !== "undefined" &&
+        "gpu" in (navigator as Navigator & { gpu?: unknown }),
+      webGl: Boolean(
+        capabilityCanvas.getContext("webgl2") ||
+          capabilityCanvas.getContext("webgl"),
+      ),
+      canvas2d: Boolean(this.canvas.getContext("2d")),
+    });
+    if (backend === "raw") {
+      throw new Error(
+        "This browser cannot create a processed local video canvas",
+      );
+    }
+    this.options.onBackend?.(backend);
     const vision = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm",
     );
-    this.landmarker = await FaceLandmarker.createFromOptions(vision, {
+    const options = {
       baseOptions: {
         modelAssetPath:
           "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-        delegate: "GPU",
       },
       runningMode: "VIDEO",
       numFaces: 1,
@@ -70,7 +100,23 @@ export class BrowserFaceSession {
       minFaceDetectionConfidence: 0.55,
       minFacePresenceConfidence: 0.55,
       minTrackingConfidence: 0.55,
-    });
+    } as const;
+    if (backend === "webgpu" || backend === "webgl") {
+      try {
+        this.landmarker = await FaceLandmarker.createFromOptions(vision, {
+          ...options,
+          baseOptions: {
+            ...options.baseOptions,
+            delegate: "GPU",
+          },
+        });
+      } catch {
+        this.options.onBackend?.("canvas2d");
+      }
+    }
+    if (!this.landmarker) {
+      this.landmarker = await FaceLandmarker.createFromOptions(vision, options);
+    }
     const response = await fetch(this.options.faceImageUrl, {
       credentials: "include",
     });

@@ -8,8 +8,13 @@
 - Browser male/female voice tones are modest pitch/EQ effects. They are not
   formant-preserving identity conversion, voice cloning or studio-quality
   cloud conversion.
-- The cloud AI/GPU fields are adapter configuration; no cloud inference worker
-  is wired into the media path.
+- The cloud frame gateway and browser publication path are wired, but the repo
+  does not include or host a photorealistic GPU model. Admin must deploy a
+  compatible RunPod, Modal, Replicate, or custom worker before cloud mode can
+  process frames.
+- The HTTPS cloud gateway currently targets two inference frames per second.
+  A production high-FPS neural swap needs a streaming WebRTC/WebSocket GPU
+  architecture and a model proven on the selected provider.
 - Browser-side AI usage can be bypassed by a modified client. Trusted LiveKit
   telemetry or cloud leases are required for strong billing enforcement.
 - Administrator TOTP enrollment/enforcement is not implemented.

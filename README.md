@@ -11,7 +11,7 @@ docs/       Architecture, security, audit and provider documentation
 ```
 
 The original NestJS/PostgreSQL edition remains preserved on
-`codex/trueface-foundation`.
+`archive/trueface-foundation-nestjs`.
 
 ## Emergent Import
 
@@ -96,9 +96,33 @@ swap. That requires a separate realtime GPU/video worker.
 
 - **Local enhanced face mask:** implemented with MediaPipe, smoothed face-oval
   compositing, adaptive lighting, feathered edges and safe raw-camera restore.
+  It is the default and works without RunPod, Modal, Replicate, or any cloud
+  GPU key. Runtime fallback is browser GPU acceleration -> CPU/Canvas 2D ->
+  restored raw camera with a visible warning.
 - **Browser voice tone:** implemented with Web Audio/AudioWorklet and processed
   LiveKit microphone publication. It is a modest tone effect, not cloning.
-- **Cloud AI face swap:** unavailable until a verified realtime GPU worker is
-  configured. Emergent LLM credits alone are not treated as video inference.
+- **Cloud AI face swap:** the backend frame gateway and browser processed-track
+  client are implemented. The feature stays unavailable until a compatible
+  realtime GPU worker is configured and healthy. Emergent LLM credits alone
+  are not treated as video inference.
+- **Emergent LLM:** optional metadata-only quality guidance, provider fallback
+  recommendations, and admin diagnostics. Live camera frames are not sent to
+  the LLM.
 - **Device guidance:** pricing and billing pages include phone recommendations
   and an optional advisory capability check.
+
+## AI Provider Environment Fallbacks
+
+```bash
+EMERGENT_LLM_API_KEY=
+EMERGENT_LLM_BASE_URL=
+AI_FACE_PROVIDER=local
+GPU_PROVIDER=
+GPU_INFERENCE_URL=
+GPU_INFERENCE_API_KEY=
+```
+
+`AI_FACE_PROVIDER=local` is the production default. Admin values saved under
+`/admin/providers` are encrypted and override these environment fields.
+`GPU_INFERENCE_URL` must implement the normalized contract documented in
+`docs/audit/GPU_FACE_REPLACEMENT_ARCHITECTURE.md`.

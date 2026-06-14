@@ -8,6 +8,7 @@ import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..ai_providers import EmergentLlmClient
 from ..audit import audit
 from ..email_service import send_email
 from ..provider_policy import (
@@ -66,6 +67,8 @@ PROVIDER_FIELDS = {
             "gatewayUrl",
             "creditsPath",
             "healthPath",
+            "chatPath",
+            "model",
             "estimatedNairaPerMinute",
             "browserModelUrl",
         },
@@ -74,11 +77,15 @@ PROVIDER_FIELDS = {
         "secret": {"apiKey", "secretKey"},
         "public": {
             "provider",
+            "enabled",
             "endpoint",
+            "healthEndpoint",
             "region",
             "model",
             "timeoutSeconds",
             "fallbackMode",
+            "maxFramesPerSecond",
+            "photorealistic",
         },
     },
     "manual-bank": {
@@ -135,18 +142,41 @@ PROVIDER_ENV = {
         "apiKey": "RESEND_API_KEY",
     },
     "ai": {
-        "gatewayUrl": "EMERGENT_AI_GATEWAY_URL",
-        "universalKey": "EMERGENT_AI_UNIVERSAL_KEY",
+        "gatewayUrl": "EMERGENT_LLM_BASE_URL",
+        "universalKey": "EMERGENT_LLM_API_KEY",
+        "chatPath": "EMERGENT_LLM_CHAT_PATH",
+        "model": "EMERGENT_LLM_MODEL",
+    },
+    "gpu": {
+        "provider": "GPU_PROVIDER",
+        "endpoint": "GPU_INFERENCE_URL",
+        "apiKey": "GPU_INFERENCE_API_KEY",
+        "healthEndpoint": "GPU_HEALTH_URL",
     },
 }
 
 
 def _environment_values(provider: str) -> dict[str, str]:
-    return {
+    result = {
         key: value
         for key, env_name in PROVIDER_ENV.get(provider, {}).items()
         if (value := os.getenv(env_name, "").strip())
     }
+    if provider == "ai":
+        result.setdefault(
+            "gatewayUrl", os.getenv("EMERGENT_AI_GATEWAY_URL", "").strip()
+        )
+        result.setdefault(
+            "universalKey",
+            os.getenv("EMERGENT_AI_UNIVERSAL_KEY", "").strip(),
+        )
+        face_provider = os.getenv("AI_FACE_PROVIDER", "").strip().lower()
+        if face_provider in {"local", "browser"}:
+            result["mode"] = "browser"
+        elif face_provider == "cloud":
+            result["mode"] = "cloud"
+        result = {key: value for key, value in result.items() if value}
+    return result
 
 
 def provider_values(request: Request, provider: str) -> dict[str, str]:
@@ -345,9 +375,15 @@ def test_provider(
                     f"Endpoint status: {response.status_code}."
                 )
             elif provider == "ai":
-                if values.get("mode") == "browser":
+                if not values.get("gatewayUrl") or not values.get("universalKey"):
+                    health_details = {
+                        "remainingCredits": None,
+                        "llmAccess": False,
+                        "capabilities": {},
+                    }
                     message = (
-                        "Browser AI is configured and does not require an API key."
+                        "Local face processing is configured and needs no cloud key. "
+                        "Emergent LLM diagnostics remain optional and unconfigured."
                     )
                 else:
                     endpoint = _provider_url(
@@ -366,16 +402,15 @@ def test_provider(
                     payload = response.json()
                     remaining_credits = _remaining_ai_credits(payload)
                     capabilities = payload.get("capabilities") or {}
-                    realtime_face_video = bool(
-                        capabilities.get("realtimeFaceVideo")
-                        or capabilities.get("realTimeFaceVideo")
-                    )
                     health_details = {
                         "remainingCredits": remaining_credits,
-                        "realtimeFaceVideo": realtime_face_video,
+                        "llmAccess": True,
+                        "capabilities": (
+                            capabilities if isinstance(capabilities, dict) else {}
+                        ),
                     }
                     message = (
-                        "Emergent AI access is working. "
+                        "Emergent LLM access is working for orchestration and diagnostics. "
                         + (
                             f"{remaining_credits} AI credits reported."
                             if remaining_credits is not None
@@ -383,8 +418,30 @@ def test_provider(
                         )
                     )
             elif provider == "gpu" and values.get("endpoint"):
-                response = httpx.get(values["endpoint"], timeout=5.0)
+                response = httpx.get(
+                    values.get("healthEndpoint") or values["endpoint"],
+                    headers={
+                        "Authorization": f"Bearer {values['apiKey']}",
+                        "Accept": "application/json",
+                    },
+                    timeout=5.0,
+                )
                 response.raise_for_status()
+                payload = response.json()
+                capabilities = (
+                    payload.get("capabilities")
+                    if isinstance(payload, dict)
+                    else {}
+                )
+                health_details = {
+                    "capabilities": (
+                        capabilities if isinstance(capabilities, dict) else {}
+                    )
+                }
+                message = (
+                    "GPU worker is reachable through the normalized TrueFace "
+                    "frame-inference contract."
+                )
             elif provider == "storage":
                 request.app.state.db.list_collection_names()
                 message = (
@@ -428,6 +485,90 @@ def test_provider(
         "message": message,
         **details,
     }
+
+
+@router.post("/ai/diagnostics")
+def ai_diagnostics(
+    request: Request,
+    _user: dict = Depends(current_user),
+    admin: dict = Depends(current_admin),
+) -> dict:
+    require_permission(admin, "providers:write")
+    ai_values = provider_values(request, "ai")
+    client = EmergentLlmClient(ai_values)
+    if not client.configured:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "EMERGENT_LLM_NOT_CONFIGURED",
+                "message": "Configure the Emergent LLM base URL and API key before running AI diagnostics.",
+            },
+        )
+    ai_health = request.app.state.db.provider_health.find_one(
+        {"provider": "ai"}
+    ) or {}
+    gpu_values = provider_values(request, "gpu")
+    gpu_health = request.app.state.db.provider_health.find_one(
+        {"provider": "gpu"}
+    ) or {}
+    payload = {
+        "configuredMode": ai_values.get("mode", "browser"),
+        "localAvailable": True,
+        "emergentLlmStatus": ai_health.get("status", "UNTESTED"),
+        "remainingLlmCredits": (ai_health.get("details") or {}).get(
+            "remainingCredits"
+        ),
+        "gpuConfigured": (
+            provider_configuration_status("gpu", gpu_values) == CONFIGURED
+        ),
+        "gpuProvider": gpu_values.get("provider"),
+        "gpuStatus": gpu_health.get("status", "UNTESTED"),
+        "gpuLastError": gpu_health.get("errorRedacted"),
+    }
+    try:
+        result = client.complete_json(
+            system_prompt=(
+                "You are the TrueFace provider diagnostics assistant. Use only "
+                "the supplied provider status metadata. Recommend local or cloud "
+                "mode, explain failures safely, and list concrete admin actions. "
+                "An LLM is not a realtime face-swap engine. Return JSON with "
+                "recommendedMode, summary, and actions."
+            ),
+            payload=payload,
+        )
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "EMERGENT_LLM_DIAGNOSTICS_FAILED",
+                "message": (
+                    "Emergent LLM diagnostics could not be completed. "
+                    f"Provider error type: {type(error).__name__}."
+                ),
+            },
+        ) from error
+    if not result:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "EMERGENT_LLM_DIAGNOSTICS_FAILED",
+                "message": "Emergent LLM returned no diagnostics.",
+            },
+        )
+    audit(
+        request.app.state.db,
+        "AI_PROVIDER_DIAGNOSTICS_RUN",
+        "PROVIDER",
+        actor_user_id=_user["id"],
+        actor_admin_id=admin["id"],
+        target_id="ai",
+        after={
+            "recommendedMode": result.get("recommendedMode"),
+            "gpuStatus": payload["gpuStatus"],
+            "emergentLlmStatus": payload["emergentLlmStatus"],
+        },
+    )
+    return result
 
 
 @router.post("/email/test-email")

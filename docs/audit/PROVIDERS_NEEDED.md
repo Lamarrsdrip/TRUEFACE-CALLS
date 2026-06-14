@@ -18,12 +18,14 @@ Required for production account recovery:
 Optional:
 
 - Paystack and/or Flutterwave; manual bank works without a gateway
-- Emergent AI gateway for supported non-realtime AI tasks; it is not assumed
-  to provide live face-video inference
-- RunPod, Modal, AWS, Replicate or custom GPU worker
+- Emergent LLM/universal-credit API for quality explanations, provider
+  orchestration, fallback decisions, and admin diagnostics
+- RunPod, Modal, Replicate or a custom GPU worker implementing the normalized
+  TrueFace synchronous frame contract
 - monitoring and WhatsApp
 - Cloudflare R2/S3 for a later storage migration
 
 All configurable credentials belong in `/admin/providers`. GridFS, local face
-masking and browser voice tones need no external API key. A genuine cloud face
-swap still needs a realtime GPU/video worker account and integration.
+masking and browser voice tones need no external API key. Calls do not require
+RunPod, Modal, Replicate, or Emergent LLM. A genuine cloud face swap still
+needs a deployed GPU/video worker.

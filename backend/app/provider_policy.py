@@ -15,9 +15,15 @@ def apply_provider_defaults(provider: str, values: dict[str, str]) -> dict[str, 
     if provider == "ai":
         result.setdefault("enabled", "true")
         result.setdefault("provider", "emergent")
-        result.setdefault("mode", "hybrid")
+        result.setdefault("mode", "browser")
         result.setdefault("creditsPath", "/credits")
         result.setdefault("healthPath", "/health")
+        result.setdefault("chatPath", "/chat/completions")
+        result.setdefault("model", "emergent-universal")
+    if provider == "gpu" and result:
+        result.setdefault("enabled", "true")
+        result.setdefault("timeoutSeconds", "12")
+        result.setdefault("fallbackMode", "local")
     if provider == "email" and result.get("provider") == "gmail":
         result.setdefault("host", "smtp.gmail.com")
         result.setdefault("port", "465")
@@ -82,18 +88,9 @@ def _required_fields(provider: str, values: dict[str, str]) -> set[str]:
             return {"provider", "senderEmail", "senderName", "apiKey"}
         return {"provider"}
     if provider == "ai":
-        mode = values.get("mode", "hybrid")
-        if mode == "browser":
-            return {"enabled", "provider", "mode"}
-        return {
-            "enabled",
-            "provider",
-            "mode",
-            "gatewayUrl",
-            "universalKey",
-        }
+        return {"enabled", "provider", "mode"}
     if provider == "gpu":
-        return {"provider", "endpoint", "apiKey"}
+        return {"enabled", "provider", "endpoint", "apiKey"}
     if provider == "manual-bank":
         return {"enabled", "bankName", "accountName", "accountNumber"}
     if provider == "monitoring":

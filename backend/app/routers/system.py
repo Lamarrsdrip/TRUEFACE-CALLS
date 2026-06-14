@@ -21,22 +21,30 @@ def readiness_payload(request: Request) -> dict:
     ai_health = request.app.state.db.provider_health.find_one(
         {"provider": "ai"}
     )
+    gpu_values = provider_values(request, "gpu")
+    gpu_health = request.app.state.db.provider_health.find_one(
+        {"provider": "gpu"}
+    )
     ai_enabled = ai_values.get("enabled", "true").lower() == "true"
-    browser_enabled = ai_enabled and ai_values.get("mode") in {
-        "browser",
-        "hybrid",
-    }
-    emergent_configured = provider_configuration_status(
-        "ai", ai_values
-    ) == CONFIGURED
+    # Local processing is the mandatory fallback for every enabled policy,
+    # including cloud-only preference when the optional worker is unavailable.
+    browser_enabled = ai_enabled
+    emergent_configured = bool(
+        ai_values.get("gatewayUrl") and ai_values.get("universalKey")
+    )
     emergent_ready = bool(
         emergent_configured
         and ai_health
         and ai_health.get("status") == "OPERATIONAL"
     )
     ai_details = (ai_health or {}).get("details") or {}
+    gpu_configured = provider_configuration_status(
+        "gpu", gpu_values
+    ) == CONFIGURED
     cloud_ready = bool(
-        emergent_ready and ai_details.get("realtimeFaceVideo")
+        gpu_configured
+        and gpu_health
+        and gpu_health.get("status") == "OPERATIONAL"
     )
     checks = {
         "database": _check(
@@ -61,11 +69,11 @@ def readiness_payload(request: Request) -> dict:
             required=True,
         ),
         "ai": _check(
-            ai_enabled and (browser_enabled or emergent_ready),
+            ai_enabled,
             (
-                "Browser-first AI is enabled with Emergent AI as the optional hybrid fallback."
-                if ai_enabled and browser_enabled
-                else "AI processing is disabled or its selected processing path is unavailable."
+                "Face processing is enabled. Local mode remains available when cloud services are unavailable."
+                if ai_enabled
+                else "AI processing is disabled."
             ),
             required=True,
         ),
@@ -82,9 +90,9 @@ def readiness_payload(request: Request) -> dict:
             **_check(
                 emergent_ready,
                 (
-                    "Emergent AI access was verified."
+                    "Emergent LLM access was verified for orchestration and diagnostics."
                     if emergent_ready
-                    else "Emergent AI credits are unavailable or have not been tested."
+                    else "Emergent LLM credits are unavailable or have not been tested."
                 ),
                 required=False,
             ),
@@ -93,9 +101,9 @@ def readiness_payload(request: Request) -> dict:
         "cloudAi": _check(
             cloud_ready,
             (
-                "The Emergent gateway reports real-time face-video capability."
+                "The configured GPU worker passed its health check."
                 if cloud_ready
-                else "Cloud face-video processing is unavailable; browser processing remains the fallback."
+                else "Cloud face-video processing is unavailable; local enhanced face mask remains the fallback."
             ),
             required=False,
         ),

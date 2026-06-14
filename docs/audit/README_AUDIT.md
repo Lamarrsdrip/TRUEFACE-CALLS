@@ -19,8 +19,8 @@ Implemented and tested:
 
 Final verification on June 14, 2026:
 
-- `50` backend tests passed.
-- `7` frontend tests passed.
+- `63` backend tests passed.
+- `20` frontend tests passed.
 - TypeScript typecheck passed.
 - Next.js production build generated all `47` routes.
 - Frontend production dependency audit reported `0` vulnerabilities.
@@ -37,8 +37,9 @@ Important limits:
   but remains non-photorealistic.
 - Browser voice tone publishes processed audio with AudioWorklet. It is a
   modest tone effect, not neural conversion or voice cloning.
-- Cloud AI face swap remains unavailable until a real realtime GPU/video
-  worker is configured and healthy.
+- The authenticated cloud frame gateway and processed LiveKit canvas path are
+  implemented. Cloud AI face swap remains unavailable until a compatible
+  GPU/video worker is configured and healthy; local mode remains fully usable.
 - Administrator TOTP MFA and server-authoritative AI runtime telemetry remain
   pre-public-launch work.
 
