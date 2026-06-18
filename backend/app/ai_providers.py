@@ -19,7 +19,17 @@ MAX_FRAME_BYTES = 4_000_000
 
 
 class ProviderResponseError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "GPU_INFERENCE_FAILED",
+        status_code: int = 502,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.safe_message = message
+        self.status_code = status_code
 
 
 def decode_image_data_url(
@@ -80,6 +90,12 @@ class GpuInferenceClient:
             headers=self._headers(),
             timeout=min(self._timeout(), 8.0),
         )
+        if getattr(response, "status_code", 200) >= 400:
+            raise _safe_provider_error(
+                response,
+                default_code="GPU_HEALTH_CHECK_FAILED",
+                default_message="GPU provider health check failed",
+            )
         response.raise_for_status()
         payload = _json_object(response)
         capabilities = payload.get("capabilities")
@@ -125,6 +141,12 @@ class GpuInferenceClient:
             },
             timeout=self._timeout(),
         )
+        if getattr(response, "status_code", 200) >= 400:
+            raise _safe_provider_error(
+                response,
+                default_code="GPU_INFERENCE_FAILED",
+                default_message="Cloud face processing failed",
+            )
         response.raise_for_status()
         payload = _json_object(response)
         processed_frame = payload.get("processedFrame")
@@ -223,6 +245,62 @@ def _json_object(response: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ProviderResponseError("Provider returned a non-object response")
     return payload
+
+
+def _safe_provider_error(
+    response: Any,
+    *,
+    default_code: str,
+    default_message: str,
+) -> ProviderResponseError:
+    status_code = _safe_status_code(getattr(response, "status_code", 502))
+    try:
+        payload = _json_object(response)
+    except Exception:
+        return ProviderResponseError(
+            default_message,
+            code=default_code,
+            status_code=status_code,
+        )
+
+    error_payload = payload.get("error")
+    if isinstance(error_payload, dict):
+        code = _safe_error_code(error_payload.get("code"), default_code)
+        message = _safe_error_message(error_payload.get("message"), default_message)
+    else:
+        code = _safe_error_code(payload.get("code"), default_code)
+        message = _safe_error_message(payload.get("message"), default_message)
+    return ProviderResponseError(message, code=code, status_code=status_code)
+
+
+def _safe_status_code(value: Any) -> int:
+    try:
+        status_code = int(value)
+    except (TypeError, ValueError):
+        return 502
+    if 400 <= status_code < 500 or status_code == 503:
+        return status_code
+    return 502
+
+
+def _safe_error_code(value: Any, default: str) -> str:
+    code = str(value or "").strip().upper()
+    if not code or len(code) > 72:
+        return default
+    if not all(character.isalnum() or character == "_" for character in code):
+        return default
+    return code
+
+
+def _safe_error_message(value: Any, default: str) -> str:
+    message = str(value or "").strip()
+    if not message or len(message) > 240:
+        return default
+    lowered = message.lower()
+    secret_terms = ("api_key", "apikey", "secret", "token", "bearer", "password")
+    if any(term in lowered for term in secret_terms):
+        return default
+    return message
 
 
 def _normalized_status(value: Any) -> str:

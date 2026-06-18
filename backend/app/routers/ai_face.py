@@ -7,6 +7,7 @@ from gridfs import GridFS
 
 from ..ai_providers import (
     GpuInferenceClient,
+    ProviderResponseError,
     decode_image_data_url,
     image_data_url,
 )
@@ -160,6 +161,25 @@ def process_frame(
             room_id=room_id,
             request_id=getattr(request.state, "request_id", ""),
         )
+    except ProviderResponseError as error:
+        LOGGER.warning(
+            "GPU inference returned safe provider error request_id=%s provider=%s code=%s",
+            getattr(request.state, "request_id", None),
+            gpu_values.get("provider", "unknown"),
+            error.code,
+        )
+        _record_gpu_health(
+            request,
+            status="DOWN",
+            latency_ms=None,
+            details={"code": error.code},
+            message=error.safe_message,
+        )
+        raise api_error(
+            error.status_code,
+            error.code,
+            error.safe_message,
+        ) from error
     except Exception as error:
         LOGGER.warning(
             "GPU inference failed request_id=%s provider=%s error_type=%s",

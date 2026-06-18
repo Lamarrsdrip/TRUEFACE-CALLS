@@ -7,6 +7,7 @@ This branch is the **Emergent-native** edition:
 ```text
 frontend/   Next.js, React, TypeScript, LiveKit client, MediaPipe and WebGL
 backend/    FastAPI on port 8001, MongoDB and private GridFS storage
+runpod-worker/  GPU face-replacement worker, Dockerfile and model setup
 docs/       Architecture, security, audit and provider documentation
 ```
 
@@ -101,10 +102,12 @@ swap. That requires a separate realtime GPU/video worker.
   restored raw camera with a visible warning.
 - **Browser voice tone:** implemented with Web Audio/AudioWorklet and processed
   LiveKit microphone publication. It is a modest tone effect, not cloning.
-- **Cloud AI face swap:** the backend frame gateway and browser processed-track
-  client are implemented. The feature stays unavailable until a compatible
-  realtime GPU worker is configured and healthy. Emergent LLM credits alone
-  are not treated as video inference.
+- **Cloud AI face swap:** the backend frame gateway, browser processed-track
+  client and versioned RunPod worker are implemented. The worker uses
+  InsightFace-style detection/recognition, multi-reference identity averaging,
+  GPU swap inference, color matching, detail sharpening, optional GFPGAN
+  restoration and temporal smoothing. Final photorealism still depends on the
+  deployed model quality and must be proven with RunPod visual tests.
 - **Emergent LLM:** optional metadata-only quality guidance, provider fallback
   recommendations, and admin diagnostics. Live camera frames are not sent to
   the LLM.
@@ -126,3 +129,6 @@ GPU_INFERENCE_API_KEY=
 `/admin/providers` are encrypted and override these environment fields.
 `GPU_INFERENCE_URL` must implement the normalized contract documented in
 `docs/audit/GPU_FACE_REPLACEMENT_ARCHITECTURE.md`.
+
+The versioned worker contract and RunPod deploy notes are in
+`runpod-worker/README.md`.

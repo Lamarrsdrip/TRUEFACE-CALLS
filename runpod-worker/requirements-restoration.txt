@@ -1,0 +1,8 @@
+# Optional detail restoration stage. Install these only in the GPU image if the
+# CUDA/Torch versions are compatible with your RunPod base image.
+torch>=2.4
+torchvision>=0.19
+gfpgan>=1.3.8
+facexlib>=0.3.0
+basicsr>=1.4.2
+realesrgan>=0.3.0

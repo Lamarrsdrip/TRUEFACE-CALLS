@@ -35,6 +35,37 @@ Frames are handled in memory and are not stored.
   "frame": "data:image/jpeg;base64,...",
   "faceProfileId": "profile-id",
   "faceProfileImage": "data:image/jpeg;base64,...",
+  "faceProfileImages": [
+    {
+      "id": "front-image-id",
+      "role": "FRONT",
+      "image": "data:image/jpeg;base64,...",
+      "mimeType": "image/jpeg",
+      "qualityScore": 100,
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "id": "left-image-id",
+      "role": "LEFT",
+      "image": "data:image/jpeg;base64,...",
+      "mimeType": "image/jpeg",
+      "qualityScore": 86,
+      "width": 1024,
+      "height": 1024
+    }
+  ],
+  "frameMetadata": {
+    "width": 960,
+    "height": 540,
+    "mimeType": "image/jpeg",
+    "byteLength": 120000
+  },
+  "qualityHints": {
+    "preserveDetail": true,
+    "temporalStability": true,
+    "targetMaxLongEdge": 1280
+  },
   "qualityMode": "standard",
   "roomId": "room-id",
   "requestId": "request-id"
@@ -58,6 +89,10 @@ Expected response:
 RunPod, Modal, Replicate, or custom infrastructure should be placed behind
 this contract. The provider account alone is insufficient; a model worker or
 adapter must be deployed.
+
+The versioned RunPod worker in `runpod-worker/` implements this contract. It
+uses all `faceProfileImages` to build one stable identity embedding instead of
+relying on a single front-facing image.
 
 ## Health
 

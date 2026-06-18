@@ -320,6 +320,50 @@ def test_process_frame_returns_specific_worker_failure(
     assert "secret upstream detail" not in response.json()["message"]
 
 
+def test_process_frame_preserves_safe_worker_error_code(
+    mongo_db, master_key, monkeypatch
+):
+    client = TestClient(create_app(database=mongo_db, master_key=master_key))
+    headers = signup(client)
+    user = mongo_db.users.find_one({"email": "user@example.com"})
+    add_authorized_media_context(mongo_db, user["id"])
+    configure_gpu(mongo_db, master_key)
+
+    class Response:
+        status_code = 422
+
+        def raise_for_status(self):
+            raise AssertionError("safe worker errors should be parsed before raise")
+
+        def json(self):
+            return {
+                "error": {
+                    "code": "FACE_NOT_DETECTED",
+                    "message": "No usable face was detected in the live frame",
+                }
+            }
+
+    monkeypatch.setattr(
+        "backend.app.ai_providers.httpx.post",
+        lambda *_args, **_kwargs: Response(),
+    )
+
+    response = client.post(
+        "/api/ai/face/process-frame",
+        headers=headers,
+        json={
+            "frame": FRAME,
+            "faceProfileId": "face-1",
+            "qualityMode": "hd",
+            "roomId": "room-1",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "FACE_NOT_DETECTED"
+    assert response.json()["message"] == "No usable face was detected in the live frame"
+
+
 def test_face_quality_uses_emergent_llm_with_metadata_only(
     mongo_db, master_key, monkeypatch
 ):
