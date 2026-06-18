@@ -9,6 +9,7 @@ from ..ai_providers import (
     GpuInferenceClient,
     ProviderResponseError,
     decode_image_data_url,
+    get_cinematic_client,
     image_data_url,
 )
 from ..errors import api_error
@@ -210,6 +211,135 @@ def process_frame(
         "processedFrame": result.processed_frame,
         "latencyMs": result.latency_ms,
         "providerStatus": result.provider_status,
+    }
+
+
+@router.post("/process-cinematic")
+async def process_cinematic(
+    body: dict,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict:
+    """Tier 2 — InstantID + SDXL cinematic face transformation.
+
+    Full appearance transformation (~2-4 s latency). Requires a dedicated
+    RunPod endpoint with higher VRAM. Configure via GPU_CINEMATIC_URL.
+    """
+    import os
+
+    room_id = str(body.get("roomId") or "").strip()
+    profile_id = str(body.get("faceProfileId") or "").strip()
+    quality_mode = str(body.get("qualityMode") or "").strip().lower()
+    if quality_mode not in QUALITY_MODES:
+        raise api_error(
+            422,
+            "INVALID_QUALITY_MODE",
+            "Quality mode must be low, standard, or hd",
+        )
+    _authorized_room(request, room_id, user["id"])
+    profile = request.app.state.db.face_profiles.find_one(
+        {
+            "id": profile_id,
+            "userId": user["id"],
+            "active": True,
+            "moderationStatus": "APPROVED",
+            "consentRevokedAt": None,
+            "deletedAt": None,
+        }
+    )
+    if not profile:
+        raise api_error(
+            403,
+            "FACE_PROFILE_NOT_APPROVED",
+            "Face profile is not approved and active",
+        )
+    try:
+        _frame_mime_type, _frame_payload = decode_image_data_url(
+            str(body.get("frame") or "")
+        )
+    except ValueError as error:
+        raise api_error(
+            422,
+            "INVALID_VIDEO_FRAME",
+            "Video frame must be a valid JPEG, PNG, or WebP image under 4 MB",
+        ) from error
+
+    cinematic_client = get_cinematic_client()
+    if cinematic_client is None:
+        raise api_error(
+            503,
+            "CINEMATIC_NOT_CONFIGURED",
+            "Cinematic mode not available — GPU_CINEMATIC_URL not configured",
+        )
+
+    face_profile_images = _profile_image_data_urls(request, profile)
+
+    worker_payload = {
+        "frame": str(body["frame"]),
+        "faceProfileId": profile_id,
+        "faceProfileImages": face_profile_images,
+        "qualityMode": quality_mode,
+        "roomId": room_id,
+        "requestId": getattr(request.state, "request_id", ""),
+    }
+
+    try:
+        async with cinematic_client as client:
+            response = await client.post("/process-cinematic", json=worker_payload)
+    except Exception as error:
+        LOGGER.warning(
+            "Cinematic GPU inference failed request_id=%s error_type=%s",
+            getattr(request.state, "request_id", None),
+            type(error).__name__,
+        )
+        raise api_error(
+            502,
+            "CINEMATIC_INFERENCE_FAILED",
+            "Cinematic face processing failed. Please try again.",
+        ) from error
+
+    if response.status_code >= 400:
+        LOGGER.warning(
+            "Cinematic GPU worker returned %s request_id=%s",
+            response.status_code,
+            getattr(request.state, "request_id", None),
+        )
+        try:
+            err_body = response.json()
+        except Exception:
+            err_body = {}
+        err = err_body.get("error") or {}
+        raise api_error(
+            response.status_code if response.status_code in {422, 429, 503} else 502,
+            str(err.get("code") or "CINEMATIC_INFERENCE_FAILED"),
+            str(err.get("message") or "Cinematic processing failed"),
+        )
+
+    try:
+        result = response.json()
+    except Exception as error:
+        raise api_error(
+            502,
+            "CINEMATIC_INVALID_RESPONSE",
+            "Cinematic worker returned an unreadable response",
+        ) from error
+
+    processed_frame = result.get("processedFrame")
+    if not isinstance(processed_frame, str) or not processed_frame.startswith(
+        "data:image/"
+    ):
+        raise api_error(
+            502,
+            "CINEMATIC_INVALID_FRAME",
+            "Cinematic worker returned an invalid processed frame",
+        )
+
+    return {
+        "processedFrame": processed_frame,
+        "latencyMs": result.get("latencyMs"),
+        "mode": result.get("mode", "cinematic"),
+        "resolution": result.get("resolution"),
+        "steps": result.get("steps"),
     }
 
 

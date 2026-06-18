@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -121,12 +122,15 @@ class GpuInferenceClient:
         quality_mode: str,
         room_id: str,
         request_id: str,
+        endpoint: str = "/process-frame",
     ) -> GpuInferenceResult:
         if not self.configured:
             raise ProviderResponseError("GPU provider not configured")
         started = time.monotonic()
+        base = self.values["endpoint"].rstrip("/")
+        target_url = f"{base}{endpoint}" if endpoint.startswith("/") else endpoint
         response = httpx.post(
-            self.values["endpoint"],
+            target_url,
             headers=self._headers(),
             json={
                 "frame": frame,
@@ -308,3 +312,29 @@ def _normalized_status(value: Any) -> str:
     if status in {"OK", "HEALTHY", "READY", "UP"}:
         return "OPERATIONAL"
     return status
+
+
+def get_cinematic_client() -> httpx.AsyncClient | None:
+    """Return an async HTTP client pointed at the cinematic GPU endpoint.
+
+    The cinematic worker runs as a separate RunPod endpoint (higher VRAM tier).
+    Configure via the GPU_CINEMATIC_URL environment variable.
+    Returns None when GPU_CINEMATIC_URL is not set so callers can gate on it.
+    """
+    cinematic_url = os.getenv("GPU_CINEMATIC_URL", "").strip()
+    if not cinematic_url:
+        return None
+    cinematic_api_key = os.getenv("GPU_CINEMATIC_API_KEY") or os.getenv(
+        "TRUEFACE_WORKER_API_KEY", ""
+    )
+    headers: dict[str, str] = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    if cinematic_api_key:
+        headers["Authorization"] = f"Bearer {cinematic_api_key}"
+    return httpx.AsyncClient(
+        base_url=cinematic_url.rstrip("/"),
+        headers=headers,
+        timeout=60.0,  # cinematic inference is slow — up to 4s on A100
+    )

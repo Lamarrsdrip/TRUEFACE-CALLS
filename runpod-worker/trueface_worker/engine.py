@@ -33,6 +33,8 @@ class FrameState:
 class ProductionFaceSwapEngine:
     """GPU worker for consented TrueFace live face replacement.
 
+    v2 pipeline: BiSeNet pixel-accurate face masks + GFPGAN mandatory restoration.
+    Supports inswapper_128 (default) and simswap_256 (if model file present).
     Heavy dependencies are imported lazily so the API contract can be tested on
     developer machines that do not have CUDA, InsightFace, or OpenCV installed.
     """
@@ -43,13 +45,15 @@ class ProductionFaceSwapEngine:
         self.cv2: Any | None = None
         self.face_app: Any | None = None
         self.swapper: Any | None = None
+        self.face_parser: Any | None = None
         self.restorer: Any | None = None
         self.providers: list[str] = []
         self.device = self.env.get("TRUEFACE_GPU_DEVICE", "unknown")
         self.models_loaded = False
         self.load_error: str | None = None
-        self.restoration_mode = "off"
-        self.parser_mode = "unavailable"
+        self.swap_model_name = "inswapper_128"
+        self.restorer_available = False
+        self.parser_available = False
         self.states: OrderedDict[str, FrameState] = OrderedDict()
         self.max_states = int(self.env.get("TRUEFACE_MAX_TRACKED_SESSIONS", "96"))
 
@@ -66,7 +70,7 @@ class ProductionFaceSwapEngine:
             import onnxruntime as ort  # type: ignore
             from insightface.app import FaceAnalysis  # type: ignore
             from insightface.model_zoo import get_model  # type: ignore
-        except Exception as exc:  # pragma: no cover - depends on GPU image
+        except Exception as exc:  # pragma: no cover
             self.models_loaded = False
             self.load_error = f"Worker dependencies missing: {exc}"
             return
@@ -83,14 +87,26 @@ class ProductionFaceSwapEngine:
         model_root = self.env.get("INSIGHTFACE_MODEL_ROOT", "/models/insightface")
         model_name = self.env.get("INSIGHTFACE_MODEL_NAME", "buffalo_l")
         det_size = int(self.env.get("FACE_DET_SIZE", "640"))
-        swapper_path = Path(
+
+        # Resolve swap model — prefer simswap_256 if present
+        simswap_path = Path(
+            self.env.get("SIMSWAP_MODEL_PATH", "/models/simswap_256.onnx")
+        )
+        inswapper_path = Path(
             self.env.get("INSWAPPER_MODEL_PATH", "/models/inswapper_128.onnx")
         )
+        if simswap_path.exists():
+            swapper_path = simswap_path
+            self.swap_model_name = "simswap_256"
+        else:
+            swapper_path = inswapper_path
+            self.swap_model_name = "inswapper_128"
 
         try:
             if not swapper_path.exists():
                 raise FileNotFoundError(
-                    f"Missing swap model at {swapper_path}. Set INSWAPPER_MODEL_PATH."
+                    f"Missing swap model at {swapper_path}. "
+                    "Set INSWAPPER_MODEL_PATH (or SIMSWAP_MODEL_PATH for SimSwap)."
                 )
 
             self.face_app = FaceAnalysis(
@@ -102,27 +118,44 @@ class ProductionFaceSwapEngine:
             ctx_id = 0 if "CUDAExecutionProvider" in self.providers else -1
             self.face_app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
             self.swapper = get_model(str(swapper_path), providers=self.providers)
-            self.restorer = self._load_restorer()
+
+            # BiSeNet face parser (optional — falls back to ellipse if model missing)
+            bisenet_path = Path(
+                self.env.get("BISENET_MODEL_PATH", "/models/bisenet_face_parsing.onnx")
+            )
+            self._load_face_parser(bisenet_path)
+
+            # GFPGAN restorer — always attempted, fallback to opencv if model absent
+            gfpgan_path = Path(
+                self.env.get("GFPGAN_MODEL_PATH", "/models/GFPGANv1.4.pth")
+            )
+            self._load_restorer(gfpgan_path)
+
             self.models_loaded = True
             self.load_error = None
-        except Exception as exc:  # pragma: no cover - depends on model files
+        except Exception as exc:  # pragma: no cover
             self.models_loaded = False
             self.load_error = f"Model load failed: {exc}"
 
     def health(self) -> dict[str, Any]:
         return {
             "modelsLoaded": self.models_loaded,
-            "providers": self.providers,
+            "swapModel": self.swap_model_name,
+            "restorerAvailable": self.restorer_available,
+            "parserAvailable": self.parser_available,
+            "provider": self.providers[0] if self.providers else "unknown",
+            "sessionCount": len(self.states),
             "device": self.device,
             "loadError": self.load_error,
+            "providers": self.providers,
             "capabilities": {
                 "multiReferenceIdentity": self.models_loaded,
                 "stableTargetLock": self.models_loaded,
                 "alignment": "insightface-landmarks" if self.models_loaded else "unavailable",
                 "colorTransfer": self.models_loaded,
                 "temporalSmoothing": self.models_loaded,
-                "restoration": self.restoration_mode,
-                "faceParsing": self.parser_mode,
+                "restoration": "gfpgan" if self.restorer_available else "opencv-sharpen-fallback",
+                "faceParsing": "bisenet" if self.parser_available else "ellipse-fallback",
                 "outputDetailEnhancement": self.models_loaded,
             },
             "modelPaths": {
@@ -132,7 +165,10 @@ class ProductionFaceSwapEngine:
                 "swapper": self.env.get(
                     "INSWAPPER_MODEL_PATH", "/models/inswapper_128.onnx"
                 ),
-                "restoration": self.env.get("GFPGAN_MODEL_PATH", ""),
+                "bisenet": self.env.get(
+                    "BISENET_MODEL_PATH", "/models/bisenet_face_parsing.onnx"
+                ),
+                "gfpgan": self.env.get("GFPGAN_MODEL_PATH", "/models/GFPGANv1.4.pth"),
             },
         }
 
@@ -191,11 +227,31 @@ class ProductionFaceSwapEngine:
         swap_ms = self._elapsed_ms(swap_started)
 
         blend_started = time.perf_counter()
-        mask = self._build_face_mask(frame, target_face)
-        color_matched = self._match_color(swapped, frame, mask)
-        restored = self._restore_details(color_matched, mask, quality_mode)
-        sharpened = self._preserve_detail(restored, mask, quality_mode)
-        output = self._temporal_blend(sharpened, mask, state, target)
+        # Extract face crop from the swapped frame for parsing
+        h_f, w_f = frame.shape[:2]
+        face_crop_bgr, crop_box = self._extract_face_crop(swapped, target_face, w_f, h_f)
+
+        # Get pixel-accurate face mask from BiSeNet parser
+        parse_mask = self._get_parse_mask(face_crop_bgr)
+
+        # Project parse mask back to full frame coordinates
+        full_mask = self._project_mask_to_frame(
+            parse_mask, crop_box, w_f, h_f, target_face
+        )
+
+        # LAB color transfer on masked region
+        color_matched = self._match_color(swapped, frame, full_mask)
+
+        # Alpha-blend swapped face back using feathered mask
+        blended = self._alpha_blend(color_matched, frame, full_mask)
+
+        # GFPGAN restoration on the face region in the output frame
+        restored, restorer_applied = self._restore_face_region(
+            blended, target_face, w_f, h_f, quality_mode
+        )
+
+        # Temporal EMA blend with previous frame
+        output = self._temporal_blend(restored, full_mask, state, target)
         blend_ms = self._elapsed_ms(blend_started)
 
         encode_started = time.perf_counter()
@@ -209,6 +265,9 @@ class ProductionFaceSwapEngine:
         return {
             "processedFrame": encoded,
             "latencyMs": self._elapsed_ms(request_started),
+            "faceDetected": True,
+            "swapModel": self.swap_model_name,
+            "restorerApplied": restorer_applied,
             "providerStatus": "OPERATIONAL",
             "mode": "cloud-ai-face-swap",
             "capabilities": self.health()["capabilities"],
@@ -216,19 +275,24 @@ class ProductionFaceSwapEngine:
                 "referenceCount": identity.reference_count,
                 "referenceRoles": identity.roles,
                 "faceCount": len(raw_faces),
-                "targetLocked": state.frame_count > 1 and lock_iou > 0.15,
+                "targetLocked": state.frame_count > 1 and lock_iou > 0.3,
                 "targetLockIou": round(lock_iou, 4),
                 "detectorMs": detector_ms,
                 "referenceMs": reference_ms,
                 "swapMs": swap_ms,
                 "blendMs": blend_ms,
                 "encodeMs": encode_ms,
-                "maskCoverage": self._mask_coverage(mask),
+                "maskCoverage": self._mask_coverage(full_mask),
                 "outputSharpness": self._sharpness(output),
-                "restoration": self.restoration_mode,
+                "parserMode": "bisenet" if self.parser_available else "ellipse-fallback",
+                "restorerMode": "gfpgan" if self.restorer_available else "opencv-sharpen-fallback",
                 "passThrough": False,
             },
         }
+
+    # ------------------------------------------------------------------
+    # Model loading helpers
+    # ------------------------------------------------------------------
 
     def _select_onnx_providers(self, available: list[str]) -> list[str]:
         preferred: list[str] = []
@@ -240,29 +304,34 @@ class ProductionFaceSwapEngine:
             preferred.append("CPUExecutionProvider")
         return preferred or available
 
-    def _load_restorer(self) -> Any | None:
-        mode = self.env.get("TRUEFACE_RESTORATION", "gfpgan").lower()
-        if mode in {"off", "none", "false"}:
-            self.restoration_mode = "off"
-            return None
+    def _load_face_parser(self, model_path: Path) -> None:
+        try:
+            from .face_parser import BiSeNetParser  # type: ignore
 
-        model_path = self.env.get("GFPGAN_MODEL_PATH", "/models/GFPGANv1.4.pth")
-        try:  # pragma: no cover - optional GPU image dependency
-            from gfpgan import GFPGANer  # type: ignore
+            self.face_parser = BiSeNetParser(model_path, self.providers)
+            self.parser_available = self.face_parser.available
+        except Exception as exc:  # pragma: no cover
+            self.face_parser = None
+            self.parser_available = False
 
-            if not Path(model_path).exists():
-                raise FileNotFoundError(model_path)
-            self.restoration_mode = "gfpgan"
-            return GFPGANer(
-                model_path=model_path,
+    def _load_restorer(self, model_path: Path) -> None:
+        try:
+            from .restoration import GFPGANRestorer  # type: ignore
+
+            self.restorer = GFPGANRestorer(
+                model_path,
                 upscale=1,
                 arch="clean",
                 channel_multiplier=2,
-                bg_upsampler=None,
             )
-        except Exception as exc:
-            self.restoration_mode = f"opencv-detail-fallback ({exc})"
-            return None
+            self.restorer_available = self.restorer.available
+        except Exception as exc:  # pragma: no cover
+            self.restorer = None
+            self.restorer_available = False
+
+    # ------------------------------------------------------------------
+    # Encode / decode
+    # ------------------------------------------------------------------
 
     def _decode_image_data_url(self, data_url: str, *, field_name: str) -> Any:
         if self.np is None or self.cv2 is None:
@@ -298,13 +367,15 @@ class ProductionFaceSwapEngine:
                 "OpenCV is not available in the worker runtime",
                 status_code=503,
             )
-        output_format = self.env.get("TRUEFACE_OUTPUT_MIME", "image/webp")
-        if output_format == "image/jpeg":
-            extension = ".jpg"
-            params = [self.cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality(quality_mode)]
-        else:
+        output_format = self.env.get("TRUEFACE_OUTPUT_MIME", "image/jpeg")
+        if output_format == "image/webp":
             extension = ".webp"
             params = [self.cv2.IMWRITE_WEBP_QUALITY, self._webp_quality(quality_mode)]
+            mime = "image/webp"
+        else:
+            extension = ".jpg"
+            params = [self.cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality(quality_mode)]
+            mime = "image/jpeg"
 
         ok, encoded = self.cv2.imencode(extension, image, params)
         if not ok:
@@ -313,8 +384,11 @@ class ProductionFaceSwapEngine:
                 "Processed frame could not be encoded",
                 status_code=502,
             )
-        mime = "image/jpeg" if extension == ".jpg" else "image/webp"
         return f"data:{mime};base64,{base64.b64encode(encoded.tobytes()).decode()}"
+
+    # ------------------------------------------------------------------
+    # Face detection and identity building
+    # ------------------------------------------------------------------
 
     def _detect_faces(self, image: Any) -> list[Any]:
         try:
@@ -359,7 +433,7 @@ class ProductionFaceSwapEngine:
 
         if not references or not source_candidates:
             raise WorkerProcessingError(
-                "REFERENCE_FACE_NOT_DETECTED",
+                "NO_REFERENCE_FACE",
                 "No usable face was detected in the selected face profile images",
                 status_code=422,
             )
@@ -407,6 +481,10 @@ class ProductionFaceSwapEngine:
                 points.append((float(point[0]), float(point[1])))
         return points
 
+    # ------------------------------------------------------------------
+    # Core swap
+    # ------------------------------------------------------------------
+
     def _swap(
         self,
         frame: Any,
@@ -432,41 +510,96 @@ class ProductionFaceSwapEngine:
             )
         except Exception as exc:
             raise WorkerProcessingError(
-                "FACE_SWAP_FAILED",
+                "SWAP_FAILED",
                 f"GPU face swap inference failed: {exc}",
                 status_code=502,
             ) from exc
 
-    def _build_face_mask(self, frame: Any, face: Any) -> Any:
+    # ------------------------------------------------------------------
+    # Face crop extraction and mask building
+    # ------------------------------------------------------------------
+
+    def _extract_face_crop(
+        self,
+        frame: Any,
+        face: Any,
+        frame_w: int,
+        frame_h: int,
+    ) -> tuple[Any, tuple[int, int, int, int]]:
+        """Extract a padded face crop (min 512px) from the frame."""
+        left, top, right, bottom = [
+            float(v) for v in self._face_value(face, "bbox")
+        ]
+        box_w = right - left
+        box_h = bottom - top
+        # Expand by ~35% for context, min 512px
+        pad_x = max(box_w * 0.35, 64)
+        pad_y = max(box_h * 0.35, 64)
+        x1 = max(0, int(left - pad_x))
+        y1 = max(0, int(top - pad_y))
+        x2 = min(frame_w - 1, int(right + pad_x))
+        y2 = min(frame_h - 1, int(bottom + pad_y))
+        crop = frame[y1:y2, x1:x2]
+        # Ensure minimum 512px long edge for parser quality
+        ch, cw = crop.shape[:2]
+        if max(ch, cw) < 512:
+            scale = 512 / max(ch, cw)
+            crop = self.cv2.resize(
+                crop,
+                (int(cw * scale), int(ch * scale)),
+                interpolation=self.cv2.INTER_LINEAR,
+            )
+        return crop, (x1, y1, x2, y2)
+
+    def _get_parse_mask(self, face_crop_bgr: Any) -> Any:
+        """Return float32 mask [0..1] from BiSeNet parser or ellipse fallback."""
+        if self.face_parser is not None:
+            return self.face_parser.parse(face_crop_bgr)
+        # Inline ellipse fallback if parser not loaded at all
+        h, w = face_crop_bgr.shape[:2]
+        mask = self.np.zeros((h, w), dtype=self.np.float32)
+        cx, cy = w // 2, int(h * 0.45)
+        rx, ry = int(w * 0.42), int(h * 0.48)
+        self.cv2.ellipse(mask, (cx, cy), (rx, ry), 0, 0, 360, 1.0, -1)
+        mask = self.cv2.GaussianBlur(mask, (21, 21), 0)
+        return mask
+
+    def _project_mask_to_frame(
+        self,
+        crop_mask: Any,
+        crop_box: tuple[int, int, int, int],
+        frame_w: int,
+        frame_h: int,
+        face: Any,
+    ) -> Any:
+        """Resize and place the crop-space mask back into full frame coordinates."""
         np = self.np
         cv2 = self.cv2
-        if np is None or cv2 is None:
-            raise WorkerProcessingError(
-                "WORKER_DEPENDENCIES_MISSING",
-                "OpenCV and NumPy are not available in the worker runtime",
-                status_code=503,
-            )
+        x1, y1, x2, y2 = crop_box
+        target_w = x2 - x1
+        target_h = y2 - y1
 
-        height, width = frame.shape[:2]
-        mask = np.zeros((height, width), dtype=np.float32)
-        landmarks = self._face_landmarks(face)
+        # Resize parse mask to match the crop region in the frame
+        resized = cv2.resize(
+            crop_mask,
+            (target_w, target_h),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        full_mask = np.zeros((frame_h, frame_w), dtype=np.float32)
+        full_mask[y1:y2, x1:x2] = resized
 
-        if len(landmarks) >= 12:
-            points = np.asarray(landmarks, dtype=np.int32)
-            hull = cv2.convexHull(points)
-            cv2.fillConvexPoly(mask, hull, 1.0)
-        else:
-            left, top, right, bottom = self._expanded_bbox(face, width, height)
-            center = (int((left + right) / 2), int((top + bottom) / 2))
-            axes = (max(12, int((right - left) / 2)), max(12, int((bottom - top) / 2)))
-            cv2.ellipse(mask, center, axes, 0, 0, 360, 1.0, -1)
+        # Feather the mask edges
+        blur = max(17, int(min(frame_w, frame_h) * 0.025) | 1)
+        dilate_k = max(3, int(min(frame_w, frame_h) * 0.006) | 1)
+        kernel = np.ones((dilate_k, dilate_k), np.uint8)
+        mask_u8 = (full_mask * 255).astype(np.uint8)
+        mask_u8 = cv2.dilate(mask_u8, kernel, iterations=1)
+        mask_u8 = cv2.GaussianBlur(mask_u8, (blur, blur), 0)
+        return np.clip(mask_u8.astype(np.float32) / 255.0, 0.0, 1.0)
 
-        blur = max(17, int(min(width, height) * 0.025) | 1)
-        dilate = max(3, int(min(width, height) * 0.008) | 1)
-        kernel = np.ones((dilate, dilate), np.uint8)
-        mask = cv2.dilate(mask, kernel, iterations=1)
-        mask = cv2.GaussianBlur(mask, (blur, blur), 0)
-        return np.clip(mask, 0.0, 1.0)
+    # ------------------------------------------------------------------
+    # Color matching and blending
+    # ------------------------------------------------------------------
 
     def _match_color(self, swapped: Any, original: Any, mask: Any) -> Any:
         np = self.np
@@ -500,47 +633,59 @@ class ProductionFaceSwapEngine:
         alpha = mask[:, :, None]
         return np.clip(matched * alpha + swapped * (1 - alpha), 0, 255).astype(np.uint8)
 
-    def _restore_details(self, image: Any, mask: Any, quality_mode: str) -> Any:
-        if quality_mode == "low":
-            return image
-        if self.restorer is None:
-            return image
-        try:  # pragma: no cover - optional GPU image dependency
-            _, _, restored = self.restorer.enhance(
-                image,
-                has_aligned=False,
-                only_center_face=False,
-                paste_back=True,
-                weight=float(self.env.get("GFPGAN_WEIGHT", "0.45")),
-            )
-            alpha = (mask * 0.85)[:, :, None]
-            return self.np.clip(restored * alpha + image * (1 - alpha), 0, 255).astype(
-                self.np.uint8
-            )
-        except Exception as exc:
-            self.restoration_mode = f"opencv-detail-fallback ({exc})"
-            return image
-
-    def _preserve_detail(self, image: Any, mask: Any, quality_mode: str) -> Any:
+    def _alpha_blend(self, swapped: Any, original: Any, mask: Any) -> Any:
         np = self.np
-        cv2 = self.cv2
-        if np is None or cv2 is None:
-            return image
+        if np is None:
+            return swapped
+        alpha = mask[:, :, None]
+        return np.clip(swapped * alpha + original * (1 - alpha), 0, 255).astype(np.uint8)
 
-        strength = {"low": 0.18, "standard": 0.28, "hd": 0.36}.get(quality_mode, 0.28)
-        blurred = cv2.GaussianBlur(image, (0, 0), 1.2)
-        sharpened = cv2.addWeighted(image, 1.0 + strength, blurred, -strength, 0)
+    # ------------------------------------------------------------------
+    # GFPGAN face restoration
+    # ------------------------------------------------------------------
 
-        lab = cv2.cvtColor(sharpened, cv2.COLOR_BGR2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
-        enhanced_l = clahe.apply(l_channel)
-        enhanced = cv2.cvtColor(
-            cv2.merge((enhanced_l, a_channel, b_channel)), cv2.COLOR_LAB2BGR
-        )
+    def _restore_face_region(
+        self,
+        frame: Any,
+        face: Any,
+        frame_w: int,
+        frame_h: int,
+        quality_mode: str,
+    ) -> tuple[Any, bool]:
+        """Run GFPGAN on the face region in the output frame, paste back."""
+        if self.restorer is None:
+            return frame, False
 
-        alpha = (mask * 0.55)[:, :, None]
-        return np.clip(enhanced * alpha + image * (1 - alpha), 0, 255).astype(np.uint8)
+        # Skip restoration in low quality mode to save latency
+        if quality_mode == "low":
+            return frame, False
+
+        try:
+            left, top, right, bottom = [
+                float(v) for v in self._face_value(face, "bbox")
+            ]
+            pad_x = (right - left) * 0.25
+            pad_y = (bottom - top) * 0.30
+            x1 = max(0, int(left - pad_x))
+            y1 = max(0, int(top - pad_y))
+            x2 = min(frame_w - 1, int(right + pad_x))
+            y2 = min(frame_h - 1, int(bottom + pad_y))
+            face_crop = frame[y1:y2, x1:x2].copy()
+
+            weight = float(self.env.get("GFPGAN_WEIGHT", "0.5"))
+            restored_crop = self.restorer.restore(face_crop, weight=weight)
+            if restored_crop is not None and restored_crop.shape == face_crop.shape:
+                output = frame.copy()
+                output[y1:y2, x1:x2] = restored_crop
+                return output, self.restorer_available
+        except Exception as exc:  # pragma: no cover
+            pass  # fall through to returning original
+
+        return frame, False
+
+    # ------------------------------------------------------------------
+    # Temporal smoothing
+    # ------------------------------------------------------------------
 
     def _temporal_blend(
         self,
@@ -555,13 +700,18 @@ class ProductionFaceSwapEngine:
         if state.previous_frame.shape != image.shape:
             return image
         lock_iou = bbox_iou(target.bbox, state.previous_face.bbox)
-        if lock_iou < 0.25:
+        if lock_iou < 0.3:
             return image
-        alpha = min(0.18, lock_iou * 0.16)
+        # EMA alpha: max 0.15, scales with IoU quality
+        alpha = min(0.15, lock_iou * 0.14)
         blend_mask = (mask * alpha)[:, :, None]
         return np.clip(
             image * (1 - blend_mask) + state.previous_frame * blend_mask, 0, 255
         ).astype(np.uint8)
+
+    # ------------------------------------------------------------------
+    # Session state management
+    # ------------------------------------------------------------------
 
     def _state_for(self, key: str) -> FrameState:
         if key in self.states:
@@ -573,6 +723,10 @@ class ProductionFaceSwapEngine:
         while len(self.states) > self.max_states:
             self.states.popitem(last=False)
         return state
+
+    # ------------------------------------------------------------------
+    # Generic face attribute accessors
+    # ------------------------------------------------------------------
 
     def _face_value(self, face: Any, key: str, default: Any = None) -> Any:
         if hasattr(face, key):
@@ -603,8 +757,12 @@ class ProductionFaceSwapEngine:
             0.0, float(bottom) - float(top)
         )
 
-    def _expanded_bbox(self, face: Any, width: int, height: int) -> tuple[int, int, int, int]:
-        left, top, right, bottom = [float(value) for value in self._face_value(face, "bbox")]
+    def _expanded_bbox(
+        self, face: Any, width: int, height: int
+    ) -> tuple[int, int, int, int]:
+        left, top, right, bottom = [
+            float(value) for value in self._face_value(face, "bbox")
+        ]
         box_width = right - left
         box_height = bottom - top
         return (
@@ -613,6 +771,10 @@ class ProductionFaceSwapEngine:
             min(width - 1, int(right + box_width * 0.18)),
             min(height - 1, int(bottom + box_height * 0.18)),
         )
+
+    # ------------------------------------------------------------------
+    # Quality metrics
+    # ------------------------------------------------------------------
 
     def _mask_coverage(self, mask: Any) -> float:
         try:
@@ -631,7 +793,7 @@ class ProductionFaceSwapEngine:
         return {"low": 78, "standard": 88, "hd": 94}.get(quality_mode, 88)
 
     def _jpeg_quality(self, quality_mode: str) -> int:
-        return {"low": 82, "standard": 91, "hd": 96}.get(quality_mode, 91)
+        return {"low": 85, "standard": 92, "hd": 95}.get(quality_mode, 92)
 
     def _elapsed_ms(self, started: float) -> int:
         return int((time.perf_counter() - started) * 1000)

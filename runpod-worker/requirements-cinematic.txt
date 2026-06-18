@@ -1,0 +1,11 @@
+# Tier 2 — InstantID + SDXL Turbo cinematic mode
+# Install AFTER requirements.txt
+diffusers>=0.28,<1
+transformers>=4.40,<5
+accelerate>=0.30,<1
+safetensors>=0.4,<1
+xformers>=0.0.26
+controlnet-aux>=0.0.9
+ip-adapter @ git+https://github.com/tencent-ailab/IP-Adapter.git
+# Pipeline helper (InstantID)
+# Copy pipeline_stable_diffusion_xl_instantid.py from InstantX/InstantID repo

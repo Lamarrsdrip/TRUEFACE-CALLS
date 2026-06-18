@@ -1,0 +1,40 @@
+FROM trueface-worker:latest
+
+WORKDIR /app
+
+COPY requirements-cinematic.txt .
+RUN pip install -r requirements-cinematic.txt
+
+# Copy InstantID pipeline helper (downloaded from InstantX/InstantID GitHub)
+ARG INSTANTID_PIPELINE_URL="https://raw.githubusercontent.com/InstantX/InstantID/main/pipeline_stable_diffusion_xl_instantid.py"
+RUN curl -L "${INSTANTID_PIPELINE_URL}" -o /app/pipeline_stable_diffusion_xl_instantid.py
+
+# Cinematic model download
+ARG INSTANTID_URL=""
+ARG SDXL_MODEL_ID="stabilityai/stable-diffusion-xl-base-1.0"
+ARG LCM_LORA_URL=""
+ARG CINEMATIC_MODELS_DIR="/models/cinematic"
+ENV CINEMATIC_MODELS_DIR=${CINEMATIC_MODELS_DIR}
+
+RUN mkdir -p ${CINEMATIC_MODELS_DIR}
+
+# Download InstantID ip-adapter
+RUN if [ -n "${INSTANTID_URL}" ]; then \
+    curl -L --fail --retry 3 "${INSTANTID_URL}" -o "${CINEMATIC_MODELS_DIR}/ip-adapter.bin"; \
+    fi
+
+# Download SDXL base (via huggingface-hub if token provided)
+ARG HF_TOKEN=""
+RUN if [ -n "${HF_TOKEN}" ]; then \
+    pip install huggingface_hub && \
+    python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${SDXL_MODEL_ID}', local_dir='${CINEMATIC_MODELS_DIR}/sdxl-base-1.0', token='${HF_TOKEN}', ignore_patterns=['*.gguf','*.bin'])"; \
+    fi
+
+# Download LCM LoRA
+RUN if [ -n "${LCM_LORA_URL}" ]; then \
+    curl -L --fail --retry 3 "${LCM_LORA_URL}" -o "${CINEMATIC_MODELS_DIR}/lcm-lora-sdxl.safetensors"; \
+    fi
+
+EXPOSE 8000
+
+CMD ["uvicorn", "worker:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "uvloop"]
