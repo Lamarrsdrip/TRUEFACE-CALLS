@@ -19,32 +19,70 @@ export interface CloudFaceSessionOptions {
   onProviderFailure(message: string): void;
 }
 
+export interface CloudFrameProfile {
+  maxLongEdge: number;
+  outputFps: number;
+  inferenceFps: number;
+  encodeQuality: number;
+  minEncodeQuality: number;
+  maxUploadBytes: number;
+  mimeTypes: readonly string[];
+}
+
+export interface EncodedCloudFrame {
+  dataUrl: string;
+  mimeType: string;
+  byteLength: number;
+}
+
 const profiles = {
   low: {
-    width: 640,
-    height: 360,
-    outputFps: 15,
-    inferenceFps: 2,
-    jpegQuality: 0.72,
+    maxLongEdge: 640,
+    outputFps: 18,
+    inferenceFps: 6,
+    encodeQuality: 0.88,
+    minEncodeQuality: 0.78,
+    maxUploadBytes: 4_000_000,
+    mimeTypes: ["image/webp", "image/jpeg"],
   },
   standard: {
-    width: 854,
-    height: 480,
+    maxLongEdge: 960,
     outputFps: 24,
-    inferenceFps: 2,
-    jpegQuality: 0.78,
+    inferenceFps: 8,
+    encodeQuality: 0.92,
+    minEncodeQuality: 0.82,
+    maxUploadBytes: 4_000_000,
+    mimeTypes: ["image/webp", "image/jpeg"],
   },
   hd: {
-    width: 1280,
-    height: 720,
+    maxLongEdge: 1280,
     outputFps: 30,
-    inferenceFps: 2,
-    jpegQuality: 0.82,
+    inferenceFps: 10,
+    encodeQuality: 0.94,
+    minEncodeQuality: 0.86,
+    maxUploadBytes: 4_000_000,
+    mimeTypes: ["image/webp", "image/jpeg"],
   },
 } as const;
 
-export function cloudFrameProfile(quality: FaceQuality) {
+export function cloudFrameProfile(quality: FaceQuality): CloudFrameProfile {
   return profiles[quality];
+}
+
+export function cloudFrameDimensions(
+  quality: FaceQuality,
+  sourceWidth: number,
+  sourceHeight: number,
+) {
+  const profile = cloudFrameProfile(quality);
+  const width = Number.isFinite(sourceWidth) && sourceWidth > 0 ? sourceWidth : 16;
+  const height =
+    Number.isFinite(sourceHeight) && sourceHeight > 0 ? sourceHeight : 9;
+  const scale = Math.min(1, profile.maxLongEdge / Math.max(width, height));
+  return {
+    width: evenDimension(width * scale),
+    height: evenDimension(height * scale),
+  };
 }
 
 export function parseCloudFrameResponse(value: unknown): CloudFrameResponse {
@@ -81,11 +119,11 @@ export class CloudFaceSession {
   private requestInFlight = false;
 
   constructor(private readonly options: CloudFaceSessionOptions) {
-    const profile = cloudFrameProfile(options.quality);
-    this.canvas.width = profile.width;
-    this.canvas.height = profile.height;
-    this.captureCanvas.width = profile.width;
-    this.captureCanvas.height = profile.height;
+    const initial = cloudFrameDimensions(options.quality, 16, 9);
+    this.canvas.width = initial.width;
+    this.canvas.height = initial.height;
+    this.captureCanvas.width = initial.width;
+    this.captureCanvas.height = initial.height;
     this.video.muted = true;
     this.video.playsInline = true;
     this.video.srcObject = new MediaStream([options.sourceTrack]);
@@ -97,6 +135,7 @@ export class CloudFaceSession {
     }
     await this.video.play();
     await waitForVideo(this.video);
+    this.resizeCanvasesToSource();
     this.running = true;
     this.drawStatus("Connecting to secure cloud face processing…");
     try {
@@ -137,7 +176,11 @@ export class CloudFaceSession {
 
   private async processNextFrame() {
     if (!this.running || this.requestInFlight) return;
-    const context = this.captureCanvas.getContext("2d");
+    this.resizeCanvasesToSource();
+    const context = this.captureCanvas.getContext("2d", {
+      alpha: false,
+      desynchronized: true,
+    } as CanvasRenderingContext2DSettings);
     if (!context) throw new Error("Cloud frame capture is unavailable");
     this.requestInFlight = true;
     const startedAt = performance.now();
@@ -150,12 +193,20 @@ export class CloudFaceSession {
         this.captureCanvas.height,
       );
       const profile = cloudFrameProfile(this.options.quality);
-      const frame = this.captureCanvas.toDataURL("image/jpeg", profile.jpegQuality);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      const frame = await encodeCloudFrame(this.captureCanvas, profile);
       const raw = await apiFetch<unknown>("/ai/face/process-frame", {
         method: "POST",
         ...jsonBody({
-          frame,
+          frame: frame.dataUrl,
           faceProfileId: this.options.faceProfileId,
+          frameMetadata: {
+            width: this.captureCanvas.width,
+            height: this.captureCanvas.height,
+            mimeType: frame.mimeType,
+            byteLength: frame.byteLength,
+          },
           qualityMode: this.options.quality,
           roomId: this.options.roomId,
         }),
@@ -178,18 +229,34 @@ export class CloudFaceSession {
     image.src = frame;
     await image.decode();
     if (!this.running) return;
-    const context = this.canvas.getContext("2d");
+    const context = this.canvas.getContext("2d", {
+      alpha: false,
+      desynchronized: true,
+    } as CanvasRenderingContext2DSettings);
     if (!context) throw new Error("Cloud output canvas is unavailable");
-    context.save();
-    context.scale(-1, 1);
-    context.drawImage(
-      image,
-      -this.canvas.width,
-      0,
-      this.canvas.width,
-      this.canvas.height,
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    drawImageCover(context, image, this.canvas.width, this.canvas.height);
+  }
+
+  private resizeCanvasesToSource() {
+    const next = cloudFrameDimensions(
+      this.options.quality,
+      this.video.videoWidth,
+      this.video.videoHeight,
     );
-    context.restore();
+    if (this.canvas.width !== next.width || this.canvas.height !== next.height) {
+      this.canvas.width = next.width;
+      this.canvas.height = next.height;
+    }
+    if (
+      this.captureCanvas.width !== next.width ||
+      this.captureCanvas.height !== next.height
+    ) {
+      this.captureCanvas.width = next.width;
+      this.captureCanvas.height = next.height;
+    }
   }
 
   private handleFailure(error: unknown) {
@@ -218,6 +285,112 @@ export class CloudFaceSession {
     context.textAlign = "center";
     context.fillText(message, this.canvas.width / 2, this.canvas.height / 2);
   }
+}
+
+function evenDimension(value: number) {
+  return Math.max(2, Math.round(value / 2) * 2);
+}
+
+async function encodeCloudFrame(
+  canvas: HTMLCanvasElement,
+  profile: CloudFrameProfile,
+): Promise<EncodedCloudFrame> {
+  const qualities = [
+    profile.encodeQuality,
+    Math.max(profile.minEncodeQuality, profile.encodeQuality - 0.06),
+    profile.minEncodeQuality,
+  ];
+  for (const mimeType of profile.mimeTypes) {
+    if (!canvasSupportsMimeType(canvas, mimeType)) continue;
+    for (const quality of qualities) {
+      const encoded = await canvasToDataUrl(canvas, mimeType, quality);
+      if (!encoded) continue;
+      if (encoded.byteLength <= profile.maxUploadBytes) {
+        return encoded;
+      }
+    }
+  }
+  const fallback = await canvasToDataUrl(
+    canvas,
+    "image/jpeg",
+    profile.minEncodeQuality,
+  );
+  if (fallback && fallback.byteLength <= profile.maxUploadBytes) {
+    return fallback;
+  }
+  throw new Error(
+    "Cloud frame is too large to upload without visible compression. Lower video quality or improve lighting.",
+  );
+}
+
+function canvasSupportsMimeType(canvas: HTMLCanvasElement, mimeType: string) {
+  if (mimeType === "image/jpeg") return true;
+  try {
+    return canvas.toDataURL(mimeType, 0.8).startsWith(`data:${mimeType}`);
+  } catch {
+    return false;
+  }
+}
+
+async function canvasToDataUrl(
+  canvas: HTMLCanvasElement,
+  mimeType: string,
+  quality: number,
+): Promise<EncodedCloudFrame | null> {
+  if (typeof canvas.toBlob === "function") {
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, mimeType, quality),
+    );
+    if (blob?.type === mimeType) {
+      return {
+        dataUrl: await blobToDataUrl(blob),
+        mimeType,
+        byteLength: blob.size,
+      };
+    }
+  }
+  const dataUrl = canvas.toDataURL(mimeType, quality);
+  if (!dataUrl.startsWith(`data:${mimeType}`)) return null;
+  return {
+    dataUrl,
+    mimeType,
+    byteLength: dataUrlByteLength(dataUrl),
+  };
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Frame encoding failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlByteLength(dataUrl: string) {
+  const encoded = dataUrl.split(",", 2)[1] ?? "";
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.floor((encoded.length * 3) / 4) - padding;
+}
+
+function drawImageCover(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  width: number,
+  height: number,
+) {
+  const sourceWidth = image.naturalWidth;
+  const sourceHeight = image.naturalHeight;
+  const scale = Math.max(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  context.drawImage(
+    image,
+    (width - drawWidth) / 2,
+    (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  );
 }
 
 async function waitForVideo(video: HTMLVideoElement): Promise<void> {

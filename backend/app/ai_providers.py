@@ -15,7 +15,7 @@ ALLOWED_FRAME_TYPES = {
     "image/png": b"\x89PNG\r\n\x1a\n",
     "image/webp": b"RIFF",
 }
-MAX_FRAME_BYTES = 2_000_000
+MAX_FRAME_BYTES = 4_000_000
 
 
 class ProviderResponseError(RuntimeError):
@@ -99,6 +99,9 @@ class GpuInferenceClient:
         frame: str,
         face_profile_id: str,
         face_profile_image: str,
+        face_profile_images: list[dict[str, Any]],
+        frame_metadata: dict[str, Any],
+        quality_hints: dict[str, Any],
         quality_mode: str,
         room_id: str,
         request_id: str,
@@ -113,6 +116,9 @@ class GpuInferenceClient:
                 "frame": frame,
                 "faceProfileId": face_profile_id,
                 "faceProfileImage": face_profile_image,
+                "faceProfileImages": face_profile_images,
+                "frameMetadata": frame_metadata,
+                "qualityHints": quality_hints,
                 "qualityMode": quality_mode,
                 "roomId": room_id,
                 "requestId": request_id,

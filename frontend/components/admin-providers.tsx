@@ -197,7 +197,7 @@ const definitions: Record<string, Definition> = {
       { key: "region", label: "Region", helper: "Optional provider region." },
       { key: "model", label: "Worker/model name", helper: "Optional deployment identifier." },
       { key: "timeoutSeconds", label: "Frame timeout (seconds)", helper: "Between 2 and 30 seconds. Realtime calls need a much lower actual latency.", type: "number" },
-      { key: "maxFramesPerSecond", label: "Maximum inference FPS", helper: "Advisory worker limit. The browser HTTPS gateway currently sends 2 frames per second.", type: "number" },
+      { key: "maxFramesPerSecond", label: "Maximum inference FPS", helper: "Advisory worker limit. The browser HTTPS gateway now adapts by quality mode: Low 6 FPS, Standard 8 FPS, HD 10 FPS.", type: "number" },
       { key: "fallbackMode", label: "Failure fallback", helper: "Local processing is the safe supported fallback.", type: "select", options: [
         { value: "local", label: "Local enhanced face mask" },
       ] },

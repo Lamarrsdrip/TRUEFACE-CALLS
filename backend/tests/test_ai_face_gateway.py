@@ -38,9 +38,15 @@ def configure_gpu(mongo_db, master_key):
 def add_authorized_media_context(mongo_db, user_id):
     now = utc_now()
     object_key = f"faces/{user_id}/front"
+    side_key = f"faces/{user_id}/left"
     GridFS(mongo_db, collection="uploads").put(
         FRAME_BYTES,
         filename=object_key,
+        contentType="image/jpeg",
+    )
+    GridFS(mongo_db, collection="uploads").put(
+        FRAME_BYTES,
+        filename=side_key,
         contentType="image/jpeg",
     )
     mongo_db.face_profiles.insert_one(
@@ -56,6 +62,34 @@ def add_authorized_media_context(mongo_db, user_id):
             "createdAt": now,
             "updatedAt": now,
         }
+    )
+    mongo_db.face_profile_images.insert_many(
+        [
+            {
+                "id": "face-image-front",
+                "faceProfileId": "face-1",
+                "objectKey": object_key,
+                "role": "FRONT",
+                "mimeType": "image/jpeg",
+                "qualityScore": 100,
+                "width": 1024,
+                "height": 1024,
+                "createdAt": now,
+                "updatedAt": now,
+            },
+            {
+                "id": "face-image-left",
+                "faceProfileId": "face-1",
+                "objectKey": side_key,
+                "role": "LEFT",
+                "mimeType": "image/jpeg",
+                "qualityScore": 100,
+                "width": 1024,
+                "height": 1024,
+                "createdAt": now,
+                "updatedAt": now,
+            },
+        ]
     )
     mongo_db.call_rooms.insert_one(
         {
@@ -115,6 +149,12 @@ def test_process_frame_requires_room_participation(mongo_db, master_key):
         json={
             "frame": FRAME,
             "faceProfileId": "face-1",
+            "frameMetadata": {
+                "width": 960,
+                "height": 540,
+                "mimeType": "image/webp",
+                "byteLength": 120_000,
+            },
             "qualityMode": "standard",
             "roomId": "room-1",
         },
@@ -192,6 +232,12 @@ def test_process_frame_calls_normalized_gpu_worker(
         json={
             "frame": FRAME,
             "faceProfileId": "face-1",
+            "frameMetadata": {
+                "width": 960,
+                "height": 540,
+                "mimeType": "image/webp",
+                "byteLength": 120_000,
+            },
             "qualityMode": "standard",
             "roomId": "room-1",
         },
@@ -210,6 +256,37 @@ def test_process_frame_calls_normalized_gpu_worker(
     assert captured["json"]["faceProfileImage"].startswith(
         "data:image/jpeg;base64,"
     )
+    assert captured["json"]["faceProfileImages"] == [
+        {
+            "id": "face-image-front",
+            "role": "FRONT",
+            "image": captured["json"]["faceProfileImage"],
+            "mimeType": "image/jpeg",
+            "qualityScore": 100,
+            "width": 1024,
+            "height": 1024,
+        },
+        {
+            "id": "face-image-left",
+            "role": "LEFT",
+            "image": captured["json"]["faceProfileImages"][1]["image"],
+            "mimeType": "image/jpeg",
+            "qualityScore": 100,
+            "width": 1024,
+            "height": 1024,
+        },
+    ]
+    assert captured["json"]["frameMetadata"] == {
+        "width": 960,
+        "height": 540,
+        "mimeType": "image/jpeg",
+        "byteLength": len(FRAME_BYTES),
+    }
+    assert captured["json"]["qualityHints"] == {
+        "preserveDetail": True,
+        "temporalStability": True,
+        "targetMaxLongEdge": 960,
+    }
     assert "gpu-secret" not in str(captured["json"])
 
 

@@ -125,12 +125,14 @@ def process_frame(
             "Face profile is not approved and active",
         )
     try:
-        decode_image_data_url(str(body.get("frame") or ""))
+        frame_mime_type, frame_payload = decode_image_data_url(
+            str(body.get("frame") or "")
+        )
     except ValueError as error:
         raise api_error(
             422,
             "INVALID_VIDEO_FRAME",
-            "Video frame must be a valid JPEG, PNG, or WebP image under 2 MB",
+            "Video frame must be a valid JPEG, PNG, or WebP image under 4 MB",
         ) from error
 
     gpu_values = provider_values(request, "gpu")
@@ -140,13 +142,20 @@ def process_frame(
             "GPU_PROVIDER_NOT_CONFIGURED",
             "Cloud AI is unavailable because the GPU provider is not configured",
         )
-    face_profile_image = _profile_data_url(request, profile)
+    face_profile_images = _profile_image_data_urls(request, profile)
+    face_profile_image = face_profile_images[0]["image"]
+    frame_metadata = _frame_metadata(
+        body.get("frameMetadata"), frame_mime_type, len(frame_payload)
+    )
     client = GpuInferenceClient(gpu_values)
     try:
         result = client.process_frame(
             frame=str(body["frame"]),
             face_profile_id=profile_id,
             face_profile_image=face_profile_image,
+            face_profile_images=face_profile_images,
+            frame_metadata=frame_metadata,
+            quality_hints=_quality_hints(quality_mode),
             quality_mode=quality_mode,
             room_id=room_id,
             request_id=getattr(request.state, "request_id", ""),
@@ -208,9 +217,32 @@ def _authorized_room(request: Request, room_id: str, user_id: str) -> dict:
     return room
 
 
-def _profile_data_url(request: Request, profile: dict) -> str:
+def _profile_image_data_urls(request: Request, profile: dict) -> list[dict]:
+    db = request.app.state.db
+    images = list(
+        db.face_profile_images.find({"faceProfileId": profile["id"]}, {"_id": 0})
+    )
+    if not images:
+        images = [
+            {
+                "id": f"{profile['id']}:front",
+                "faceProfileId": profile["id"],
+                "objectKey": profile["objectKey"],
+                "role": "FRONT",
+                "mimeType": profile.get("mimeType", "image/jpeg"),
+                "qualityScore": profile.get("qualityScore"),
+                "width": profile.get("width"),
+                "height": profile.get("height"),
+            }
+        ]
+    role_order = {"FRONT": 0, "LEFT": 1, "RIGHT": 2, "LIGHTING": 3, "EXPRESSION": 4}
+    images.sort(key=lambda image: role_order.get(str(image.get("role")), 99))
+    return [_profile_image_payload(request, image) for image in images[:5]]
+
+
+def _profile_image_payload(request: Request, image: dict) -> dict:
     item = GridFS(request.app.state.db, collection="uploads").find_one(
-        {"filename": profile["objectKey"]}
+        {"filename": image["objectKey"]}
     )
     if not item:
         raise api_error(
@@ -226,9 +258,40 @@ def _profile_data_url(request: Request, profile: dict) -> str:
             "The approved face profile image exceeds the cloud processing limit",
         )
     stored_type = (getattr(item, "_file", {}) or {}).get("contentType")
-    return image_data_url(
-        payload, stored_type or profile.get("mimeType", "image/jpeg")
-    )
+    mime_type = stored_type or image.get("mimeType", "image/jpeg")
+    return {
+        "id": str(image.get("id") or image["objectKey"]),
+        "role": str(image.get("role") or "FRONT"),
+        "image": image_data_url(payload, mime_type),
+        "mimeType": mime_type,
+        "qualityScore": image.get("qualityScore"),
+        "width": image.get("width"),
+        "height": image.get("height"),
+    }
+
+
+def _frame_metadata(value: object, mime_type: str, byte_length: int) -> dict:
+    result = {"mimeType": mime_type, "byteLength": byte_length}
+    if not isinstance(value, dict):
+        return result
+    for key in ("width", "height"):
+        try:
+            parsed = int(value.get(key, 0))
+        except (TypeError, ValueError):
+            continue
+        if 0 < parsed <= 4096:
+            result[key] = parsed
+    return result
+
+
+def _quality_hints(quality_mode: str) -> dict:
+    return {
+        "preserveDetail": True,
+        "temporalStability": True,
+        "targetMaxLongEdge": {"low": 640, "standard": 960, "hd": 1280}[
+            quality_mode
+        ],
+    }
 
 
 def _gpu_health(request: Request, values: dict[str, str]) -> dict | None:

@@ -14,6 +14,7 @@ import {
   LocalVideoTrack,
   RoomEvent,
   Track,
+  type TrackPublishOptions,
 } from "livekit-client";
 import {
   Camera,
@@ -37,7 +38,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch, jsonBody } from "../lib/api";
 import { BrowserFaceSession } from "../lib/browser-face-session";
-import { CloudFaceSession } from "../lib/cloud-face-session";
+import { CloudFaceSession, cloudFrameProfile } from "../lib/cloud-face-session";
 import {
   BrowserVoiceSession,
   browserVoiceSupport,
@@ -94,6 +95,28 @@ interface AccountSession {
 
 interface FaceProcessingSession {
   stop(): void;
+}
+
+function processedVideoPublishOptions(
+  quality: "low" | "standard" | "hd",
+  name: string,
+): TrackPublishOptions {
+  const profile = cloudFrameProfile(quality);
+  return {
+    source: Track.Source.Camera,
+    name,
+    stream: "trueface-camera",
+    simulcast: false,
+    degradationPreference: "maintain-resolution",
+    videoEncoding: {
+      maxBitrate: {
+        low: 1_200_000,
+        standard: 2_500_000,
+        hd: 4_500_000,
+      }[quality],
+      maxFramerate: profile.outputFps,
+    },
+  };
 }
 
 export function CallRoomClient({ slug }: { slug: string }) {
@@ -816,10 +839,10 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
               true,
             );
           }
-          await room.localParticipant.publishTrack(localProcessedTrack, {
-            source: Track.Source.Camera,
-            name: "local-face-mask-fallback",
-          });
+          await room.localParticipant.publishTrack(
+            localProcessedTrack,
+            processedVideoPublishOptions(quality, "local-face-mask-fallback"),
+          );
           cloudSession.stop();
           aiSession.current = localSession;
           processedTrack.current = localProcessedTrack;
@@ -890,13 +913,15 @@ function RoomExperience({ roomInfo }: { roomInfo: RoomInfo }) {
             await room.localParticipant.unpublishTrack(localTrack, false);
           },
           async publishProcessed() {
-            await room.localParticipant.publishTrack(nextProcessed, {
-              source: Track.Source.Camera,
-              name:
+            await room.localParticipant.publishTrack(
+              nextProcessed,
+              processedVideoPublishOptions(
+                quality,
                 activeMode === "cloud"
                   ? "cloud-ai-face-swap"
                   : "local-face-mask",
-            });
+              ),
+            );
           },
           async restoreOriginal() {
             await room.localParticipant.publishTrack(localTrack, {
